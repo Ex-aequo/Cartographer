@@ -60,11 +60,13 @@ export function drawLabels(
   a: RenderAssets,
   selectedLabel: string | null = null,
   selectedSymbol: number | null = null,
+  /** false to draw over what is already on the canvas (export) */
+  clear = true,
 ): DrawnLabel[] {
   const drawn: DrawnLabel[] = [];
   const edits = map.labels ?? {};
   ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  if (clear) ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   // placed symbols sit under the lettering
   drawSymbols(ctx, cssW, cssH, dpr, view, map, selectedSymbol);

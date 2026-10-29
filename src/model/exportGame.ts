@@ -3,6 +3,7 @@ import { hexCenterX, hexCenterY, toAxial } from './hex';
 import { DEPTH_METRES, ELEVATION_METRES } from '../gen/biomes';
 import type { DataLayer } from './layers';
 import { pinnedForExport } from './symbols';
+import { seaZones } from '../export/maps';
 
 /** A layer value as plain JSON: category id (or null), number, true/false, or a list of tag ids. */
 export function exportValue(l: DataLayer, i: number): number | boolean | number[] | null {
@@ -32,6 +33,7 @@ export function buildGameExport(map: MapData) {
   const { cols, rows } = map.grid;
   const hexes = [];
   const pinned = pinnedForExport(map);
+  const sea = seaZones(map);
   const symbolsByHex = new Map<number, string[]>();
   for (const p of pinned) symbolsByHex.set(p.hex, [...(symbolsByHex.get(p.hex) ?? []), p.symbol]);
   const hexLayers = (map.layers ?? []).filter((l) => l.def.scope === 'hex');
@@ -67,6 +69,7 @@ export function buildGameExport(map: MapData) {
         riverFlow: f & HexFlag.River ? round(map.hex.flux[i], 1) : 0,
         flowsTo: map.hex.flowTo[i],
         province: map.hex.province[i],
+        seaZone: sea.zoneOf[i] >= 0 ? sea.zones[sea.zoneOf[i]].id : -1,
         edited: map.edits ? map.edits.touched[i] !== 0 : false,
         paintedTerrain: !!map.edits && map.edits.terrain[i] >= 0,
         data: dataOf(hexLayers, i),
@@ -118,6 +121,7 @@ export function buildGameExport(map: MapData) {
     cultures: map.cultures,
     rivers: map.rivers.map((r) => ({ id: r.id, name: r.name, hexes: r.hexes })),
     hexes,
+    seaZones: sea.zones.map((z) => ({ id: z.id, name: z.name, kind: z.kind, hexCount: z.hexes.length, coastalProvinces: z.coast })),
     symbols: pinned,
     layers: (map.layers ?? []).map(({ def }) => ({
       id: def.id,

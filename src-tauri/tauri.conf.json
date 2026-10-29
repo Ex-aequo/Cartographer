@@ -1,0 +1,38 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Cartographer",
+  "version": "0.4.0",
+  "identifier": "io.github.ex-aequo.cartographer",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Cartographer",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 960,
+        "minHeight": 600,
+        "dragDropEnabled": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Graphics and Design",
+    "shortDescription": "Fantasy and game maps",
+    "longDescription": "Generate fantasy worlds, edit land, borders and names, add game data layers and symbols, and export images and engine-ready maps.",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "fileAssociations": [
+      { "ext": ["cartomap"], "name": "Cartographer map", "description": "Cartographer map", "role": "Editor", "mimeType": "application/x-cartomap" }
+    ]
+  }
+}
