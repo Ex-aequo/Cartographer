@@ -2,16 +2,25 @@ import { useEffect, useRef, useState } from 'react';
 import type { MapData } from '../model/types';
 import type { RenderAssets } from '../render/assets';
 import type { MapMode } from '../render/mapModes';
-import { modeDef } from '../render/mapModes';
+import { MODES, modeDef } from '../render/mapModes';
+import { layerColors } from '../model/layers';
 import type { DataLayer } from '../model/layers';
 import { LOOKS, WIDTHS, highResSize, renderHighRes, sharpnessFor, type LookKey } from '../export/highres';
 import { runExport, type ExportPart } from '../export/request';
 import { zip } from '../util/zip';
 
-export type DialogPart = 'image' | ExportPart;
+export type DialogPart = 'image' | 'modes' | ExportPart;
+
+/** Every map mode, plus one per custom data layer, as `{ key, name, file }`. */
+export function modeList(map: MapData): { key: MapMode; name: string; file: string }[] {
+  const built = MODES.map((m, i) => ({ key: m.key as MapMode, name: m.label, file: `modes/${String(i + 1).padStart(2, '0')}-${m.key}.png` }));
+  const layers = (map.layers ?? []).map((l) => ({ key: `layer:${l.def.id}` as MapMode, name: l.def.name, file: `modes/layer-${l.def.id}.png` }));
+  return [...built, ...layers];
+}
 
 const PARTS: { key: DialogPart; name: string; files: string }[] = [
-  { key: 'image', name: 'Map image', files: 'map.png' },
+  { key: 'image', name: 'Map image', files: 'map.png (the current map mode)' },
+  { key: 'modes', name: 'Map modes', files: 'modes/*.png: one image per map mode and per data layer' },
   { key: 'provinces', name: 'Province map', files: 'provinces.png, definition.csv (one colour per province and sea zone)' },
   { key: 'heightmap', name: 'Heightmaps', files: 'heightmap.png (16-bit), heightmap_8bit.png' },
   { key: 'terrain', name: 'Terrain, water and river masks', files: 'terrain.png, water.png, rivers.png, masks/*.png' },
@@ -38,6 +47,10 @@ export function ExportDialog(p: Props) {
   const [provWidth, setProvWidth] = useState(4096);
   const [smooth, setSmooth] = useState(false);
   const [rasterWidth, setRasterWidth] = useState(2048);
+  const allModes = modeList(p.map);
+  const [modes, setModes] = useState<Set<string>>(new Set(allModes.map((m) => m.key)));
+  const [modeLook, setModeLook] = useState<LookKey>('realm');
+  const [modeWidth, setModeWidth] = useState(4096);
   const [busy, setBusy] = useState<{ label: string; f: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const first = useRef<HTMLInputElement>(null);
@@ -64,24 +77,36 @@ export function ExportDialog(p: Props) {
     const list = PARTS.filter((x) => parts.has(x.key)).map((x) => x.key);
     if (!list.length) return;
     const files: { name: string; data: Uint8Array }[] = [];
-    const workerParts = list.filter((k): k is ExportPart => k !== 'image');
-    const share = list.includes('image') ? (workerParts.length ? 0.6 : 1) : 0;
+    const workerParts = list.filter((k): k is ExportPart => k !== 'image' && k !== 'modes');
+    const chosenModes = list.includes('modes') ? allModes.filter((m) => modes.has(m.key)) : [];
+    // progress: one unit per image, one for everything the worker builds
+    const units = (list.includes('image') ? 1 : 0) + chosenModes.length + (workerParts.length ? 1 : 0);
+    let done = 0;
+    const step = (label: string, f: number) => setBusy({ label, f: (done + f) / units });
     try {
       if (list.includes('image')) {
-        setBusy({ label: 'Painting the map', f: 0 });
-        const blob = await renderHighRes(p.map, p.assets, { width, look, mode: p.mode, layer: p.layer }, (label, f) => setBusy({ label, f: f * share }));
+        const blob = await renderHighRes(p.map, p.assets, { width, look, mode: p.mode, layer: p.layer }, (label, f) => step(label, f));
         files.push({ name: 'map.png', data: new Uint8Array(await blob.arrayBuffer()) });
+        done++;
+      }
+      for (const m of chosenModes) {
+        const l = m.key.startsWith('layer:') ? p.map.layers.find((x) => `layer:${x.def.id}` === m.key) : undefined;
+        const layer = l ? { colors: layerColors(p.map, l), badges: l.def.showIcons ? l : null } : null;
+        const blob = await renderHighRes(p.map, p.assets, { width: modeWidth, look: modeLook, mode: m.key, layer }, (_label, f) => step(`Map mode: ${m.name}`, f));
+        files.push({ name: m.file, data: new Uint8Array(await blob.arrayBuffer()) });
+        done++;
       }
       if (workerParts.length) {
-        const got = await runExport({ map: p.map, parts: workerParts, provinceWidth: provWidth, smooth, rasterWidth }, (label, f) => setBusy({ label, f: share + f * (1 - share) }));
+        const got = await runExport({ map: p.map, parts: workerParts, provinceWidth: provWidth, smooth, rasterWidth }, (label, f) => step(label, f));
         files.push(...got);
+        done++;
       }
       setBusy({ label: 'Packing', f: 1 });
       if (files.length === 1) {
         const f = files[0];
         p.onDownload(new Blob([f.data as BlobPart], { type: f.name.endsWith('.png') ? 'image/png' : f.name.endsWith('.json') ? 'application/json' : 'text/csv' }), `${p.fileBase}-${f.name}`);
       } else {
-        files.push({ name: 'README.txt', data: new TextEncoder().encode(readme(p.map, list, { width, look, provWidth, smooth, rasterWidth, mode: p.modeLabel })) });
+        files.push({ name: 'README.txt', data: new TextEncoder().encode(readme(p.map, list, { width, look, provWidth, smooth, rasterWidth, mode: p.modeLabel, modes: chosenModes, modeWidth, modeLook })) });
         p.onDownload(new Blob([zip(files) as BlobPart], { type: 'application/zip' }), `${p.fileBase}-export.zip`);
       }
       p.onClose();
@@ -137,6 +162,52 @@ export function ExportDialog(p: Props) {
                   <p className="muted small">
                     Map mode: {p.modeLabel}. {sharp < 1 ? `At this size the ${LOOKS.find((l) => l.key === look)!.name.toLowerCase()} is softer than on screen; pick a larger size for full detail.` : `${sharp.toFixed(1)}× the detail of your screen.`}
                     {img.width * img.height > 120e6 ? ' Very large: this needs a lot of memory and may take a minute.' : ''}
+                  </p>
+                </div>
+              )}
+              {x.key === 'modes' && parts.has('modes') && (
+                <div className="export-opts">
+                  <label className="field">
+                    <span>Style</span>
+                    <select value={modeLook} onChange={(e) => setModeLook(e.target.value as LookKey)}>
+                      {LOOKS.map((l) => (
+                        <option key={l.key} value={l.key}>
+                          {l.name} — {l.hint}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>Size</span>
+                    <select value={modeWidth} onChange={(e) => setModeWidth(Number(e.target.value))}>
+                      {[2048, 4096, 8192].map((w) => (
+                        <option key={w} value={w}>
+                          {w.toLocaleString()} × {highResSize(p.map, w).height.toLocaleString()} px
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="mode-picks">
+                    {allModes.map((m) => (
+                      <label key={m.key} className="check check--tight">
+                        <input
+                          type="checkbox"
+                          checked={modes.has(m.key)}
+                          onChange={() =>
+                            setModes((s) => {
+                              const n = new Set(s);
+                              if (n.has(m.key)) n.delete(m.key);
+                              else n.add(m.key);
+                              return n;
+                            })
+                          }
+                        />
+                        {m.name}
+                      </label>
+                    ))}
+                  </div>
+                  <p className="muted small">
+                    {modes.size} {modes.size === 1 ? 'image' : 'images'}, each drawn like the map image. Data layers are listed after the built-in modes.
                   </p>
                 </div>
               )}
@@ -200,7 +271,7 @@ export function ExportDialog(p: Props) {
               <button className="btn btn--ghost" onClick={p.onClose}>
                 Cancel
               </button>
-              <button className="btn btn--seal" onClick={go} disabled={!parts.size}>
+              <button className="btn btn--seal" onClick={go} disabled={!parts.size || (parts.size === 1 && parts.has('modes') && !modes.size)}>
                 {parts.size > 1 ? `Export ${parts.size} parts` : 'Export'}
               </button>
             </>
@@ -211,7 +282,11 @@ export function ExportDialog(p: Props) {
   );
 }
 
-function readme(map: MapData, parts: DialogPart[], o: { width: number; look: string; provWidth: number; smooth: boolean; rasterWidth: number; mode: string }): string {
+function readme(
+  map: MapData,
+  parts: DialogPart[],
+  o: { width: number; look: string; provWidth: number; smooth: boolean; rasterWidth: number; mode: string; modes: { name: string; file: string }[]; modeWidth: number; modeLook: string },
+): string {
   const lines = [
     `Cartographer export — ${map.meta.name} (seed ${map.meta.params.seed})`,
     `Grid ${map.grid.cols} × ${map.grid.rows} hexes, pointy-top, odd rows shifted right. World ${map.world.width.toFixed(2)} × ${map.world.height.toFixed(2)} units (1 unit = hex radius).`,
@@ -219,6 +294,7 @@ function readme(map: MapData, parts: DialogPart[], o: { width: number; look: str
     '',
   ];
   if (parts.includes('image')) lines.push(`map.png — ${o.width} px wide, ${o.look} style, ${o.mode} map mode.`);
+  if (o.modes.length) lines.push(`modes/ — ${o.modeWidth} px wide, ${o.modeLook} style, one image per map mode: ${o.modes.map((m) => `${m.file.slice(6)} (${m.name})`).join(', ')}.`);
   if (parts.includes('provinces'))
     lines.push(
       `provinces.png — ${o.provWidth} px wide, ${o.smooth ? 'curved borders as drawn' : 'borders along hex edges'}. Each land province and sea zone has its own colour.`,

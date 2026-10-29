@@ -208,6 +208,7 @@ export function App() {
           { label: 'Data layers', hint: 'One CSV table per layer, zipped', run: onExportCsv, disabled: !layers.length },
           { label: 'Image of this view', hint: 'PNG at screen resolution', run: onExportImage },
           { label: 'High-resolution image…', hint: 'The whole world, up to 16,384 px wide', run: () => setExporting(['image']) },
+          { label: 'All map modes…', hint: 'One image per map mode and data layer, zipped', run: () => setExporting(['modes']) },
           { label: 'Export set…', hint: 'Image, province map, heightmaps, masks, tables', run: () => setExporting(['image', 'provinces', 'heightmap', 'terrain', 'tables', 'gamedata']) },
         ]}
       />
