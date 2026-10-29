@@ -217,3 +217,27 @@ export function newRealmFrom(map: MapData, region: number): number {
 }
 
 export const REALM_TITLES = ['Empire', 'Kingdom', 'Grand Duchy', 'Duchy', 'County', 'Principality', 'Republic', 'Khanate', 'Sultanate', 'Theocracy'];
+
+/**
+ * 4X maps: gives a province back to the free land, next to free land it
+ * touches if there is any. Returns false for a kingdom's capital.
+ */
+export function releaseProvince(map: MapData, province: number): boolean {
+  const p = map.provinces[province];
+  const own = map.realms[map.regions[p.region].realm];
+  if (own.unclaimed || own.capitalProvince === province) return false;
+  let free = map.realms.find((r) => r.unclaimed && !r.retired);
+  if (!free) {
+    free = { id: map.realms.length, name: 'Free lands', title: 'Free lands', culture: own.culture, color: [196, 186, 160], regions: [], capitalProvince: province, unclaimed: true };
+    map.realms.push(free);
+  }
+  const near = [...p.neighbors, ...p.seaNeighbors].map((q) => map.provinces[q].region).find((rg) => map.realms[map.regions[rg].realm].unclaimed);
+  if (near !== undefined) p.region = near;
+  else {
+    const id = map.regions.length;
+    map.regions.push({ id, name: nameFor(map, map.meta.params.seed, 200000 + id, own.culture), provinces: [province], realm: free.id, capitalProvince: province });
+    free.regions.push(id);
+    p.region = id;
+  }
+  return true;
+}

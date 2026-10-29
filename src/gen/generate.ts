@@ -1,4 +1,5 @@
 import { DEFAULT_PARAMS, FORMAT_ID, FORMAT_VERSION, type GenParams, type MapData } from '../model/types';
+import { gameGrid, sanitizeGame } from '../model/game';
 import { worldSize } from '../model/hex';
 import { Rng } from '../util/rng';
 import { generateHeightfield } from './heightfield';
@@ -6,6 +7,7 @@ import { erode } from './erosion';
 import { generateMoisture, generateTemperature } from './climate';
 import { buildHexes } from './hydrology';
 import { buildPolitical } from './political';
+import { buildGamePolitical } from './political4x';
 
 export type Progress = (step: string, fraction: number) => void;
 
@@ -30,7 +32,7 @@ export function generateMap(params: GenParams, onProgress: Progress = () => {}):
   const finalMoisture = generateMoisture(p, hf, baseTemp, width, height, rng);
   const { hex, nbr, rivers } = buildHexes(p, grid, hf, baseTemp, finalMoisture, rng, { autoLakes: false });
   onProgress('Drawing borders', 0.7);
-  const pol = buildPolitical(p, grid, hex, nbr, rivers, rng);
+  const pol = p.game?.on ? buildGamePolitical(p, grid, hex, nbr, rivers, rng) : buildPolitical(p, grid, hex, nbr, rivers, rng);
 
   return {
     format: FORMAT_ID,
@@ -53,12 +55,16 @@ export function generateMap(params: GenParams, onProgress: Progress = () => {}):
 
 export function sanitize(p: GenParams): GenParams {
   const c = (v: number, a: number, b: number) => Math.min(b, Math.max(a, Number.isFinite(v) ? v : a));
+  const game = sanitizeGame(p.game);
+  const landFraction = c(p.landFraction, 0.15, 0.7);
+  const size = game?.on ? gameGrid(game, landFraction) : null;
   return {
     ...p,
+    ...(game ? { game } : {}),
     seed: String(p.seed || 'cartographer'),
-    cols: Math.round(c(p.cols, 40, 600)),
-    rows: Math.round(c(p.rows, 30, 400)),
-    landFraction: c(p.landFraction, 0.15, 0.7),
+    cols: size ? size.cols : Math.round(c(p.cols, 40, 600)),
+    rows: size ? size.rows : Math.round(c(p.rows, 30, 400)),
+    landFraction,
     mountains: c(p.mountains, 0, 1),
     rainfall: c(p.rainfall, 0.4, 1.6),
     erosion: c(p.erosion ?? DEFAULT_PARAMS.erosion, 0, 1),

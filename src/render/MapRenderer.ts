@@ -19,15 +19,49 @@ export interface RenderState {
   hoveredProvince: number;
 }
 
-/** Zoom thresholds in CSS px per world unit. */
-export const ZOOM = {
+/** Zoom thresholds in CSS px per world unit, for classic maps. */
+const ZOOM_CLASSIC = {
   paperEnd: 5.5,
   terrainStart: 12,
   hexStart: 38,
   hexFull: 60,
+  /** realm names fade out between these */
+  realmFade0: 6,
+  realmFade1: 8.5,
+  /** towns and province names fade in between these */
+  townFade0: 13,
+  townFade1: 18,
   min: 0.6,
   max: 220,
 };
+
+/**
+ * Zoom thresholds in CSS px per world unit for the map on screen. Small 4X
+ * maps (few, big hexes) fill the screen at a much higher zoom, so the paper
+ * map and terrain steps move up with the zoom that shows the whole world;
+ * classic maps keep the fixed values above.
+ */
+export const ZOOM = { ...ZOOM_CLASSIC };
+
+export function applyZoomProfile(world: { width: number }): void {
+  const fit = 1300 / Math.max(1, world.width); // whole world on a typical screen
+  const paperEnd = Math.max(ZOOM_CLASSIC.paperEnd, 1.4 * fit);
+  const terrainStart = Math.max(ZOOM_CLASSIC.terrainStart, 2.3 * fit);
+  const hexStart = Math.max(ZOOM_CLASSIC.hexStart, 3.4 * fit);
+  const realmFade0 = Math.max(ZOOM_CLASSIC.realmFade0, paperEnd * 1.09);
+  const townFade0 = Math.max(ZOOM_CLASSIC.townFade0, terrainStart * 0.85);
+  Object.assign(ZOOM, {
+    paperEnd,
+    terrainStart,
+    hexStart,
+    hexFull: hexStart * (ZOOM_CLASSIC.hexFull / ZOOM_CLASSIC.hexStart),
+    realmFade0,
+    realmFade1: realmFade0 * (ZOOM_CLASSIC.realmFade1 / ZOOM_CLASSIC.realmFade0),
+    townFade0,
+    townFade1: townFade0 * (ZOOM_CLASSIC.townFade1 / ZOOM_CLASSIC.townFade0),
+    max: Math.max(ZOOM_CLASSIC.max, hexStart * 5),
+  });
+}
 
 export type Quality = 'high' | 'balanced' | 'fast';
 
@@ -150,6 +184,7 @@ export class MapRenderer {
   setMap(map: MapData, a: RenderAssets): void {
     this.disposeTextures();
     this.world = map.world;
+    applyZoomProfile(map.world);
     const u = this.mapMat.uniforms;
     u.uWorld.value.set(map.world.width, map.world.height);
 

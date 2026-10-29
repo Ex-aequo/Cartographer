@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import type React from 'react';
-import type { GenParams, MapData, Template } from '../model/types';
+import { DEFAULT_GAME, type GameSettings, type GenParams, type MapData, type Template } from '../model/types';
+import { gameGrid, gameReport, sanitizeGame } from '../model/game';
+import { NumField } from './fields';
 import { RacesSection } from './RacesSection';
 import { racesOrPresets } from '../model/races';
 import { randomSeedWord } from '../util/rng';
@@ -82,6 +84,9 @@ export function WorldPanel({ params, onChange, onGenerate, busy, hasEdits, map, 
   const set = <K extends keyof GenParams>(k: K, v: GenParams[K]) => onChange({ ...params, [k]: v });
   const sizeIdx = SIZES.findIndex((s) => s.cols === params.cols);
   const climateIdx = CLIMATES.findIndex((c) => c.north === params.tempNorth && c.south === params.tempSouth);
+  const game = params.game ?? DEFAULT_GAME;
+  const isGame = game.on;
+  const setGame = (patch: Partial<GameSettings>) => onChange({ ...params, game: sanitizeGame({ ...game, ...patch }) });
 
   return (
         <form
@@ -102,6 +107,23 @@ export function WorldPanel({ params, onChange, onGenerate, busy, hasEdits, map, 
           </label>
 
           <fieldset className="field">
+            <legend>{t('Map type')}</legend>
+            <div className="seg seg--2">
+              <button type="button" className={!isGame ? 'is-on' : ''} onClick={() => setGame({ on: false })}>
+                {t('Classic')}
+                <small>{t('Realms, regions, provinces')}</small>
+              </button>
+              <button type="button" className={isGame ? 'is-on' : ''} onClick={() => setGame({ on: true })}>
+                {t('4X game')}
+                <small>{t('One kingdom per player')}</small>
+              </button>
+            </div>
+          </fieldset>
+
+          {isGame && <GameSection game={game} landFraction={params.landFraction} onChange={setGame} map={map} />}
+
+          {!isGame && (
+          <fieldset className="field">
             <legend>{t('Size')}</legend>
             <div className="seg">
               {SIZES.map((s, i) => (
@@ -112,6 +134,7 @@ export function WorldPanel({ params, onChange, onGenerate, busy, hasEdits, map, 
               ))}
             </div>
           </fieldset>
+          )}
 
           <label className="field">
             <span>{t('Shape of the land')}</span>
@@ -147,16 +170,68 @@ export function WorldPanel({ params, onChange, onGenerate, busy, hasEdits, map, 
             </select>
           </label>
 
-          <Slider label={t('Province size')} value={params.provinceSize} min={12} max={80} step={1} format={(v) => t('{n} hexes', { n: v })} onChange={(v) => set('provinceSize', v)} />
-          <Slider label={t('Realms')} value={params.realmCount} min={3} max={80} step={1} format={(v) => String(v)} onChange={(v) => set('realmCount', v)} />
+          {!isGame && (
+            <>
+              <Slider label={t('Province size')} value={params.provinceSize} min={12} max={80} step={1} format={(v) => t('{n} hexes', { n: v })} onChange={(v) => set('provinceSize', v)} />
+              <Slider label={t('Realms')} value={params.realmCount} min={3} max={80} step={1} format={(v) => String(v)} onChange={(v) => set('realmCount', v)} />
+            </>
+          )}
 
-          <RacesSection races={racesOrPresets(params.races)} realmCount={params.realmCount} onChange={(races) => set('races', races)} map={map} onFit={onFit} working={working} onDownload={onDownload} notify={notify} />
+          <RacesSection races={racesOrPresets(params.races)} realmCount={isGame ? game.players : params.realmCount} onChange={(races) => set('races', races)} map={map} onFit={onFit} working={working} onDownload={onDownload} notify={notify} />
 
           {hasEdits && <p className="warn">{t('Drawing a new world replaces this one, including your edits. Save first to keep them.')}</p>}
           <button type="submit" className="btn btn--seal btn--sticky" disabled={busy}>
             {t(busy ? 'Drawing…' : hasEdits ? 'Discard edits and draw' : 'Draw this world')}
           </button>
         </form>
+  );
+}
+
+/** 4X settings: players, the two intervals, free land and balance, and the map size they make. */
+function GameSection({ game, landFraction, onChange, map }: { game: GameSettings; landFraction: number; onChange(p: Partial<GameSettings>): void; map: MapData | null }) {
+  const grid = gameGrid(game, landFraction);
+  const avgP = (game.provinces[0] + game.provinces[1]) / 2;
+  const report = map ? gameReport(map) : null;
+  return (
+    <div className="game">
+      <Slider label={t('Players')} value={game.players} min={2} max={120} step={1} format={(v) => t('{n} kingdoms', { n: v })} onChange={(v) => onChange({ players: v })} />
+      <Interval label={t('Provinces per kingdom')} value={game.provinces} min={1} max={30} onChange={(v) => onChange({ provinces: v })} />
+      <Interval label={t('Hexes per province')} value={game.hexes} min={1} max={30} onChange={(v) => onChange({ hexes: v })} />
+      <Slider label={t('Free land')} value={game.free} min={0} max={0.8} step={0.05} format={(v) => `${Math.round(v * 100)}%`} onChange={(v) => onChange({ free: v })} />
+      <label className="check">
+        <input type="checkbox" checked={game.balanced} onChange={(e) => onChange({ balanced: e.target.checked })} />
+        <span>
+          {t('Balanced kingdoms')}
+          <small>{t('Every kingdom gets the same number of provinces and land of similar worth.')}</small>
+        </span>
+      </label>
+      <p className="hint">
+        {t('Map of {cols} × {rows} hexes, about {p} provinces.', { cols: grid.cols, rows: grid.rows, p: Math.round((game.players * avgP * 1.12) / Math.max(0.2, 1 - game.free)) })}
+        {game.hexes[1] < game.hexes[0] * 2 - 1 && ' ' + t('A narrow hex interval may leave a few provinces outside it.')}
+      </p>
+      {report && (
+        <p className={report.provincesOut.length || report.kingdomsOut.length ? 'warn' : 'hint'}>
+          {t('This world: {k} kingdoms, {f}% free land.', { k: report.players, f: Math.round(report.freeShare * 100) })}{' '}
+          {report.provincesOut.length > 0 && t('{n} provinces outside the hex interval.', { n: report.provincesOut.length })}{' '}
+          {report.kingdomsOut.length > 0 && t('{n} kingdoms outside the province interval.', { n: report.kingdomsOut.length })}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** A min–max pair of whole numbers. */
+function Interval({ label, value, min, max, onChange }: { label: string; value: [number, number]; min: number; max: number; onChange(v: [number, number]): void }) {
+  const clamp = (v: number) => Math.round(Math.min(max, Math.max(min, v)));
+  return (
+    <div className="field interval">
+      <span className="field__label">{label}</span>
+      <div className="interval__row">
+        <NumField value={value[0]} aria-label={t('{name}: minimum', { name: label })} onCommit={(v) => onChange([clamp(v), Math.max(clamp(v), value[1])])} />
+        <span>{t('to')}</span>
+        <NumField value={value[1]} aria-label={t('{name}: maximum', { name: label })} onCommit={(v) => onChange([Math.min(value[0], clamp(v)), clamp(v)])} />
+      </div>
+    </div>
   );
 }
 

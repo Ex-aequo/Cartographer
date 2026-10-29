@@ -42,6 +42,36 @@ Requires Node 20 or newer and a browser with WebGL 2.
   climate band, province size and number of realms.
   *Draw this world* generates it; the same seed and settings always give the
   same world.
+- **Map type** (in *New world*): *Classic* (realms, regions, provinces, sized
+  by the Size buttons) or *4X game*, a map for a strategy game where each
+  player rules one kingdom:
+  - *Players*: how many kingdoms (2–120). The map is sized from it: enough
+    land for every kingdom plus the free land, at the chosen land share. The
+    panel shows the size before you draw (e.g. 51 × 32 hexes for 24 players).
+  - *Provinces per kingdom* and *Hexes per province*: min and max (default
+    3–6 and 3–5). These are hard limits: provinces are cut from the edges of
+    the land inward, then merged, traded or re-cut until each one fits; islets
+    too small for a province join the nearest coast across the water. A very
+    narrow hex interval (max below 2 × min − 1) can leave a few that cannot fit;
+    the panel and the inspector say so.
+  - *Free land*: the share left unclaimed for expansion (0–80 %), drawn with
+    fine hatching.
+  - *Balanced kingdoms*: every kingdom gets the same number of provinces;
+    capitals go to good land, the poorest kingdom picks first, and poor
+    provinces are traded for better free ones.
+  - Kingdoms may reach across narrow water. A kingdom boxed in by its
+    neighbours gets provinces passed along a chain of kingdoms, or moves to
+    open land.
+  - There is no region level: hex → province → kingdom. Zoom levels are World
+    (paper map of kingdoms), Kingdom (provinces and towns) and Hex. Small maps
+    get a finer heightfield and climate, so each big hex still carries detailed
+    land.
+  - The inspector shows the kingdom, its player slot and its size, warns when a
+    province or kingdom is outside its interval, and can give a province back
+    to the free land. *Change kingdom* (Edit tab) moves provinces between
+    kingdoms and free land; capitals stay with their kingdom.
+  - The game data adds `player` on kingdoms and provinces, `free` on
+    provinces and a `game` block with the rules (see docs/DATA_FORMAT.md).
 - **Races** (in *New world*): tick the peoples of the world (Humans, Dwarves,
   Elves, Auroch, Orcs, Lizardfolk, Nomads, Frost folk, or your own) and set
   each one's homeland: lines like "at least 50 % of the kingdom is Mountains /
@@ -201,4 +231,6 @@ clicks always land on the province you see.
    images, province ID image with sea zones, heightmaps and masks, CSV) and
    the desktop app.
 5. **0.5 (done)**: races with homeland biases.
-6. **0.6 (this release)**: 3D view with turn, tilt and relief, full editing in 3D.
+6. **0.6 (done)**: 3D view with turn, tilt and relief, full editing in 3D.
+7. **0.7 (this release)**: 4X game maps: one kingdom per player, provinces
+   and kingdoms held inside chosen intervals, free land, balanced starts.

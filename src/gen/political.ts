@@ -676,7 +676,7 @@ function clusterGraph(
   });
 }
 
-function farthestPoints(pts: [number, number][], k: number, rng: Rng): number[] {
+export function farthestPoints(pts: [number, number][], k: number, rng: Rng): number[] {
   if (!pts.length) return [];
   const chosen = [rng.int(0, pts.length - 1)];
   const minD = pts.map((p) => dist2(p, pts[chosen[0]]));
@@ -698,11 +698,11 @@ function farthestPoints(pts: [number, number][], k: number, rng: Rng): number[] 
   return chosen;
 }
 
-function dist2(a: [number, number], b: [number, number]): number {
+export function dist2(a: [number, number], b: [number, number]): number {
   return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2;
 }
 
-function centroidOf(pts: [number, number][]): [number, number] {
+export function centroidOf(pts: [number, number][]): [number, number] {
   if (!pts.length) return [0, 0];
   let x = 0;
   let y = 0;
@@ -722,7 +722,7 @@ export const PALETTE: [number, number, number][] = [
   [134, 110, 150], [168, 120, 40], [90, 60, 46], [120, 150, 140],
 ];
 
-function assignColors(realms: Realm[], regions: Region[], provinces: Province[], rng: Rng): void {
+export function assignColors(realms: Realm[], regions: Region[], provinces: Province[], rng: Rng): void {
   const adj = realms.map(() => new Set<number>());
   for (const pr of provinces) {
     const a = regions[pr.region].realm;

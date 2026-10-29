@@ -50,7 +50,14 @@ interface Props {
   onAdjustLabel(patch: Partial<LabelEdit> | null): void;
   onAdjustLabelEnd(label: string): void;
   onShowAllLabels(): void;
+  /** 4X map: no region tool, and Change realm moves provinces between kingdoms */
+  game?: boolean;
 }
+
+const GAME_LABELS: Partial<Record<ToolId, string>> = { realm: 'Change kingdom' };
+const GAME_HINTS: Partial<Record<ToolId, string>> = {
+  realm: 'Start inside a kingdom (or free land) and drag across provinces: they join it. Capitals stay with their kingdom.',
+};
 
 export function EditPanel(p: Props) {
   const s = p.settings;
@@ -62,17 +69,17 @@ export function EditPanel(p: Props) {
         <fieldset key={g.name} className="field">
           <legend>{t(g.name)}</legend>
           <div className="tools">
-            {g.tools.map((tool) => (
+            {g.tools.filter((tool) => !(p.game && tool === 'region')).map((tool) => (
               <button key={tool} type="button" className={`tool ${s.tool === tool ? 'is-on' : ''}`} aria-pressed={s.tool === tool} onClick={() => set({ tool: s.tool === tool ? null : tool })}>
                 <ToolIcon tool={tool} />
-                {t(TOOL_LABELS[tool])}
+                {t((p.game && GAME_LABELS[tool]) || TOOL_LABELS[tool])}
               </button>
             ))}
           </div>
         </fieldset>
       ))}
 
-      {s.tool ? <p className="hint">{t(HINTS[s.tool])} {t('Right-drag or hold Space to move the map.')} {t('In 3D, right-drag turns and tilts it; middle-drag or Space moves it.')}</p> : <p className="hint">{t('Pick a tool to start. Click a province with no tool to rename it. Every change can be undone.')}</p>}
+      {s.tool ? <p className="hint">{t((p.game && GAME_HINTS[s.tool]) || HINTS[s.tool])} {t('Right-drag or hold Space to move the map.')} {t('In 3D, right-drag turns and tilts it; middle-drag or Space moves it.')}</p> : <p className="hint">{t('Pick a tool to start. Click a province with no tool to rename it. Every change can be undone.')}</p>}
 
       {s.tool && BRUSH_TOOLS.includes(s.tool) && (
         <label className="field">

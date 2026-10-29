@@ -1,3 +1,4 @@
+import { HEIGHT_RES } from './heightfield';
 import type { EditLayers, Field, GenParams, HexLayers, River } from '../model/types';
 import { Biome, HexFlag, Relief } from '../model/types';
 import { buildNeighbors, hexCenterX, hexCenterY, sampleField, type Grid } from '../model/hex';
@@ -30,6 +31,8 @@ export function buildHexes(
   const edits = opts.edits;
   const n = grid.cols * grid.rows;
   const nbr = buildNeighbors(grid);
+  // 4X maps: each hex covers S² times the land of a classic hex (S = 1 on classic maps)
+  const S = height.res / HEIGHT_RES;
   const hex: HexLayers = {
     elevation: new Float32Array(n),
     temperature: new Float32Array(n),
@@ -59,7 +62,7 @@ export function buildHexes(
         if (s < lo) lo = s;
         if (s > hi) hi = s;
       }
-      rough[i] = hi - lo;
+      rough[i] = (hi - lo) / S;
       hex.moisture[i] = sampleField(moisture, x, y);
       hex.temperature[i] = sampleField(baseTemp, x, y) - Math.max(0, e) * LAPSE;
       if (e >= 0) hex.flags[i] |= HexFlag.Land;
@@ -92,7 +95,7 @@ export function buildHexes(
         }
       }
     }
-    const lake = !touchesEdge && comp.length < 60;
+    const lake = !touchesEdge && comp.length < Math.max(3, 60 / (S * S));
     for (const i of comp) (lake ? isLake : isOcean)[i] = 1;
   }
 
@@ -110,7 +113,7 @@ export function buildHexes(
     const row = Math.floor(i / grid.cols);
     const x = hexCenterX(i % grid.cols, row);
     const y = hexCenterY(row);
-    const v = 1 - Math.abs(valleyNoise.fbm(x / 9, y / 9, 3));
+    const v = 1 - Math.abs(valleyNoise.fbm((x * S) / 9, (y * S) / 9, 3));
     route[i] = e - 0.035 * v * v * v;
   }
 
@@ -151,7 +154,7 @@ export function buildHexes(
   for (const i of order) if (hex.flags[i] & HexFlag.Land && filled[i] - route[i] > 0.02) cand[i] = 1;
   const lseen = new Uint8Array(n);
   const newLake = new Uint8Array(n);
-  let lakeBudget = autoLakes ? Math.round((n / 4000) * (0.6 + p.rainfall * 0.6)) : 0;
+  let lakeBudget = autoLakes ? Math.round(((n * S * S) / 4000) * (0.6 + p.rainfall * 0.6)) : 0;
   for (let s = 0; s < n && lakeBudget > 0; s++) {
     if (!cand[s] || lseen[s]) continue;
     const comp: number[] = [];
@@ -274,7 +277,7 @@ export function buildHexes(
   const landFlux: number[] = [];
   for (let i = 0; i < n; i++) if (hex.flags[i] & HexFlag.Land) landFlux.push(hex.flux[i]);
   landFlux.sort((a, b) => a - b);
-  const threshold = Math.max(14, landFlux[Math.floor(landFlux.length * 0.935)] ?? 14);
+  const threshold = Math.max(14 / (S * S), landFlux[Math.floor(landFlux.length * 0.935)] ?? 14);
   const isRiver = new Uint8Array(n);
   for (let i = 0; i < n; i++) if (hex.flags[i] & HexFlag.Land && (hex.flux[i] >= threshold || forced[i]) && !blocked[i]) isRiver[i] = 1;
   const hasRiverUpstream = new Uint8Array(n);

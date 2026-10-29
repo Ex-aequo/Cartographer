@@ -46,7 +46,33 @@ export interface GenParams {
   tempSouth: number;
   /** Races and their homeland biases (only the enabled ones shape the world). */
   races?: RaceDef[];
+  /** 4X game map: one kingdom per player, with sizes held inside fixed intervals. */
+  game?: GameSettings;
 }
+
+/**
+ * Settings of a 4X game map. When `on`, the map is sized from the number of
+ * players, every province has `hexes[0]..hexes[1]` hexes, every kingdom
+ * `provinces[0]..provinces[1]` provinces, and `free` of the land is left
+ * unclaimed for expansion. There is no region level: hex → province → kingdom.
+ */
+export interface GameSettings {
+  on: boolean;
+  players: number;
+  /** provinces per kingdom, [min, max] */
+  provinces: [number, number];
+  /** hexes per province, [min, max] */
+  hexes: [number, number];
+  /** share of the land left unclaimed, 0..0.8 */
+  free: number;
+  /** every kingdom gets the same number of provinces and land of similar worth */
+  balanced: boolean;
+}
+
+export const DEFAULT_GAME: GameSettings = { on: false, players: 24, provinces: [3, 6], hexes: [3, 5], free: 0.3, balanced: true };
+
+/** True when the map is a 4X game map. */
+export const isGameMap = (p: { game?: GameSettings } | undefined): boolean => !!p?.game?.on;
 
 export const DEFAULT_PARAMS: GenParams = {
   seed: 'amber-reach-417',
@@ -223,6 +249,10 @@ export interface Realm {
   capitalProvince: number;
   /** race id (see model/races.ts); absent = unaligned */
   race?: string;
+  /** 4X maps: the player slot (1, 2, …) that rules this kingdom */
+  player?: number;
+  /** 4X maps: the land nobody rules yet (one such realm holds all free provinces) */
+  unclaimed?: boolean;
 }
 
 export interface Culture {

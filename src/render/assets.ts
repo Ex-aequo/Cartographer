@@ -250,7 +250,8 @@ export function buildRenderAssets(
 
   const realmPalette = new Uint8Array((map.realms.length + 1) * 4);
   map.realms.forEach((r) => {
-    realmPalette.set([r.color[0], r.color[1], r.color[2], 255], (r.id + 1) * 4);
+    // free land (4X maps) has no wash: alpha 0 tells the shader
+    realmPalette.set([r.color[0], r.color[1], r.color[2], r.unclaimed ? 0 : 255], (r.id + 1) * 4);
   });
 
   return { coast, coastW, coastH, coastRes: map.height.res, hexOwners, hexAux, hexData, farm, farmW, farmH, paint, warp, warpW, warpH, realmLabels, regionLabels, provinceLabels, river, realmPalette };

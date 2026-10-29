@@ -2,7 +2,7 @@ import { t } from '../i18n';
 import { restoreSymbols, snapshotSymbols, type SymbolSnapshot } from '../model/symbols';
 import type { LabelEdit, MapData } from '../model/types';
 import { layersOf, rollUps, runRules, type DataLayer } from '../model/layers';
-import { HexFlag, Terrain, Touched } from '../model/types';
+import { HexFlag, Terrain, Touched, isGameMap } from '../model/types';
 import { hexAt, hexCenterX, hexCenterY, sampleField } from '../model/hex';
 import { ensureEdits } from '../gen/rederive';
 import { growInto, mergeProvinces, splitProvince } from './political';
@@ -130,6 +130,8 @@ interface Stroke {
   hexes: Set<number>;
   /** province, region or realm being extended (border tools) */
   target: number;
+  /** 4X maps, Change realm: the region provinces join (kingdoms move province by province) */
+  targetRegion?: number;
   labelKey?: string;
   layersBefore?: LayerSnapshot;
 }
@@ -247,6 +249,7 @@ export class EditSession {
     if (settings.tool === 'assign') target = p0;
     else if (settings.tool === 'region') target = p0 >= 0 ? map.provinces[p0].region : -1;
     else if (settings.tool === 'realm') target = p0 >= 0 ? map.regions[map.provinces[p0].region].realm : -1;
+    const targetRegion = p0 >= 0 ? map.provinces[p0].region : -1;
     if (['assign', 'region', 'realm'].includes(settings.tool) && target < 0) {
       this.message = t('Start the stroke on land, inside the province, region or realm you want to extend.');
       return;
@@ -273,6 +276,7 @@ export class EditSession {
       points: [[x, y]],
       hexes: new Set(),
       target,
+      targetRegion,
       labelKey: ctx.labelKey,
       layersBefore: settings.tool === 'layer' ? snapshotLayers(map) : undefined,
     };
@@ -473,7 +477,14 @@ export class EditSession {
           pr.region = s.target;
           for (const q of pr.hexes) s.hexes.add(q);
         }
-        if (tool === 'realm') {
+        if (tool === 'realm' && isGameMap(map.meta.params)) {
+          // 4X: a kingdom grows province by province; capitals stay where they are
+          const own = map.regions[pr.region].realm;
+          if (own !== s.target && map.realms[own].capitalProvince !== pr.id && s.targetRegion !== undefined && s.targetRegion >= 0) {
+            pr.region = s.targetRegion;
+            for (const q of pr.hexes) s.hexes.add(q);
+          }
+        } else if (tool === 'realm') {
           const rg = map.regions[pr.region];
           if (rg.realm !== s.target) {
             rg.realm = s.target;

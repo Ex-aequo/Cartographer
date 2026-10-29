@@ -1,9 +1,9 @@
 import { projector } from './camera';
 import { drawSymbols, pictureFor } from './symbols';
 import { assetById, settlementAsset } from '../model/symbols';
-import type { LabelEdit, MapData } from '../model/types';
+import { isGameMap, type LabelEdit, type MapData } from '../model/types';
 import type { CurveLabel, RenderAssets } from './assets';
-import type { View } from './MapRenderer';
+import { ZOOM, type View } from './MapRenderer';
 import { hexCenterX, hexCenterY } from '../model/hex';
 
 export const LABEL_FONT = '"IM Fell English SC", "IM Fell English", Georgia, serif';
@@ -87,13 +87,14 @@ export function drawLabels(
   const hits = (b: number[]) => boxes.some((o) => b[0] < o[2] && b[2] > o[0] && b[1] < o[3] && b[3] > o[1]);
 
   // ---- realm names: large, curved, letter-spaced (world zooms)
-  const realmAlpha = 1 - fade(z, 6, 8.5);
+  const game = isGameMap(map.meta.params);
+  const realmAlpha = 1 - fade(z, ZOOM.realmFade0, ZOOM.realmFade1);
   if (realmAlpha > 0.01) {
     for (const l0 of a.realmLabels) {
       const key = `realm:${l0.id}`;
       const e = edits[key];
-      if (e?.hidden || map.realms[l0.id]?.retired) continue;
-      const box = drawCurved(ctx, adjustedCurve(l0, e, map.realms[l0.id]?.name ?? l0.text), toScreen, scaleAt(l0.p1[0], l0.p1[1]), realmAlpha, onScreen, REALM_STYLE);
+      if (e?.hidden || map.realms[l0.id]?.retired || map.realms[l0.id]?.unclaimed) continue;
+      const box = drawCurved(ctx, adjustedCurve(l0, e, map.realms[l0.id]?.name ?? l0.text), toScreen, scaleAt(l0.p1[0], l0.p1[1]), realmAlpha, onScreen, game ? KINGDOM_STYLE : REALM_STYLE);
       // while realm names are still legible, region names keep clear of them
       if (box && realmAlpha > 0.25) {
         boxes.push(box);
@@ -103,7 +104,8 @@ export function drawLabels(
   }
 
   // ---- region (duchy) names: realm zoom
-  const regionAlpha = fade(z, 7, 9) * (1 - fade(z, 15, 19));
+  // 4X maps have no region level: a kingdom is its own region
+  const regionAlpha = isGameMap(map.meta.params) ? 0 : fade(z, 7, 9) * (1 - fade(z, 15, 19));
   if (regionAlpha > 0.01) {
     for (const l0 of a.regionLabels) {
       const key = `region:${l0.id}`;
@@ -119,7 +121,7 @@ export function drawLabels(
   }
 
   // ---- settlements
-  const iconAlpha = fade(z, 13, 18);
+  const iconAlpha = fade(z, ZOOM.townFade0, ZOOM.townFade1);
   const iconAt: [number, number, number][] = []; // per province: x, y, half-size
   if (iconAlpha > 0.01) {
     const realmCapitals = new Set(map.realms.filter((r) => !r.retired).map((r) => r.capitalProvince));
@@ -154,7 +156,7 @@ export function drawLabels(
   }
 
   // ---- province names
-  const provAlpha = fade(z, 13, 18);
+  const provAlpha = fade(z, ZOOM.townFade0, ZOOM.townFade1);
   if (provAlpha > 0.01) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -234,9 +236,12 @@ interface CurveStyle {
   minPx: number;
   /** extra spacing between letters, as a fraction of font size (max) */
   spread: number;
+  /** small territories (4X kingdoms): keep the name legible and near level, even past the borders */
+  legible?: boolean;
 }
 
 const REALM_STYLE: CurveStyle = { font: LABEL_FONT, fill: [52, 34, 20, 0.8], halo: [236, 224, 196, 0.35], maxPx: 9999, minPx: 7, spread: 0.85 };
+const KINGDOM_STYLE: CurveStyle = { ...REALM_STYLE, fill: [44, 28, 16, 0.92], halo: [240, 230, 205, 0.62], maxPx: 26, minPx: 11, spread: 0.3, legible: true };
 const REGION_STYLE: CurveStyle = { font: LABEL_FONT, fill: [36, 24, 14, 0.86], halo: [240, 230, 205, 0.5], maxPx: 24, minPx: 10, spread: 0.3 };
 
 function drawCurved(
@@ -250,12 +255,27 @@ function drawCurved(
   blocked?: (box: number[]) => boolean,
 ): number[] | null {
   let p0 = toScreen(l.p0[0], l.p0[1]);
-  const p1 = toScreen(l.p1[0], l.p1[1]);
+  let p1 = toScreen(l.p1[0], l.p1[1]);
   let p2 = toScreen(l.p2[0], l.p2[1]);
   // on a turned map, read the name left to right
   if (p2[0] < p0[0]) [p0, p2] = [p2, p0];
   if (z <= 0) return null;
   let px = Math.min(style.maxPx, l.size * z);
+  if (style.legible) {
+    // a straight line through the territory, at most 25° off level, long enough for the name
+    px = Math.max(style.minPx, px);
+    const mx = (p0[0] + p2[0]) / 2;
+    const my = (p0[1] + p2[1]) / 2;
+    let ang = Math.atan2(p2[1] - p0[1], p2[0] - p0[0]);
+    const lim = (25 * Math.PI) / 180;
+    ang = Math.max(-lim, Math.min(lim, ang));
+    ctx.font = `${px}px ${style.font}`;
+    const need = ctx.measureText(l.text.toUpperCase()).width * (1 + style.spread * 0.6) + px;
+    const half = Math.max(Math.hypot(p2[0] - p0[0], p2[1] - p0[1]), need) / 2;
+    p0 = [mx - Math.cos(ang) * half, my - Math.sin(ang) * half];
+    p2 = [mx + Math.cos(ang) * half, my + Math.sin(ang) * half];
+    p1 = [mx, my];
+  }
   if (px < style.minPx) return null;
   if (!onScreen(p0[0], p0[1], 400) && !onScreen(p2[0], p2[1], 400) && !onScreen(p1[0], p1[1], 400)) return null;
   // arc-length table

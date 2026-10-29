@@ -1,4 +1,5 @@
 import type { Field, GenParams } from '../model/types';
+import { HEIGHT_RES, heightResFor } from './heightfield';
 import { sampleField } from '../model/hex';
 import { Rng } from '../util/rng';
 import { Simplex2, clamp, smoothstep } from '../util/noise';
@@ -7,20 +8,26 @@ import { Simplex2, clamp, smoothstep } from '../util/noise';
 export const CLIMATE_RES = 1;
 
 /** Sea-level temperature field, °C. */
+/** Climate texels per world unit: more on small 4X maps, so the climate keeps classic detail. */
+function climateRes(p: GenParams, worldW: number): number {
+  return (CLIMATE_RES * heightResFor(p, worldW)) / HEIGHT_RES;
+}
+
 export function generateTemperature(p: GenParams, worldW: number, worldH: number, rngRoot: Rng): Field {
   const n = new Simplex2(rngRoot.fork('temp'));
-  const w = Math.ceil(worldW * CLIMATE_RES);
-  const h = Math.ceil(worldH * CLIMATE_RES);
+  const RES = climateRes(p, worldW);
+  const w = Math.ceil(worldW * RES);
+  const h = Math.ceil(worldH * RES);
   const data = new Float32Array(w * h);
   for (let j = 0; j < h; j++) {
     const t = (j + 0.5) / h;
     const base = p.tempNorth + (p.tempSouth - p.tempNorth) * Math.pow(t, 0.92);
     for (let i = 0; i < w; i++) {
-      const X = (i + 0.5) / CLIMATE_RES / worldH;
+      const X = (i + 0.5) / RES / worldH;
       data[j * w + i] = base + 4.5 * n.fbm(X * 3, t * 3, 3);
     }
   }
-  return { w, h, res: CLIMATE_RES, data };
+  return { w, h, res: RES, data };
 }
 
 /**
@@ -31,8 +38,9 @@ export function generateTemperature(p: GenParams, worldW: number, worldH: number
 export function generateMoisture(p: GenParams, height: Field, temp: Field, worldW: number, worldH: number, rngRoot: Rng): Field {
   const rng = rngRoot.fork('moisture');
   const n = new Simplex2(rng);
-  const w = Math.ceil(worldW * CLIMATE_RES);
-  const h = Math.ceil(worldH * CLIMATE_RES);
+  const RES = climateRes(p, worldW);
+  const w = Math.ceil(worldW * RES);
+  const h = Math.ceil(worldH * RES);
   const rain = new Float32Array(w * h);
 
   for (let j = 0; j < h; j++) {
@@ -43,8 +51,8 @@ export function generateMoisture(p: GenParams, height: Field, temp: Field, world
     let prevH = 0;
     for (let k = 0; k < w; k++) {
       const i = east ? k : w - 1 - k;
-      const x = (i + 0.5) / CLIMATE_RES;
-      const y = (j + 0.5) / CLIMATE_RES;
+      const x = (i + 0.5) / RES;
+      const y = (j + 0.5) / RES;
       const hh = sampleField(height, x, y);
       const tt = sampleField(temp, x, y);
       const cap = clamp((tt + 12) / 38, 0.35, 1);
@@ -70,7 +78,7 @@ export function generateMoisture(p: GenParams, height: Field, temp: Field, world
   // Normalise over land, then shape: subtropical dry belt, noise, user multiplier.
   const landVals: number[] = [];
   for (let j = 0; j < h; j++)
-    for (let i = 0; i < w; i++) if (sampleField(height, (i + 0.5) / CLIMATE_RES, (j + 0.5) / CLIMATE_RES) >= 0) landVals.push(rain[j * w + i]);
+    for (let i = 0; i < w; i++) if (sampleField(height, (i + 0.5) / RES, (j + 0.5) / RES) >= 0) landVals.push(rain[j * w + i]);
   landVals.sort((a, b) => a - b);
   const lo = landVals[Math.floor(landVals.length * 0.02)] ?? 0;
   const hi = landVals[Math.floor(landVals.length * 0.98)] ?? 1;
@@ -79,14 +87,14 @@ export function generateMoisture(p: GenParams, height: Field, temp: Field, world
     const lat = (j + 0.5) / h;
     const dry = Math.exp(-(((lat - dryLat) / 0.09) ** 2));
     for (let i = 0; i < w; i++) {
-      const X = (i + 0.5) / CLIMATE_RES / worldH;
+      const X = (i + 0.5) / RES / worldH;
       let m = (rain[j * w + i] - lo) / (hi - lo || 1);
       m = m * (1 - 0.42 * dry) + 0.16 * n.fbm(X * 4, lat * 4, 3);
       m *= p.rainfall;
       rain[j * w + i] = clamp(smoothstep(-0.05, 1.05, m), 0, 1);
     }
   }
-  return { w, h, res: CLIMATE_RES, data: rain };
+  return { w, h, res: RES, data: rain };
 }
 
 function blur(a: Float32Array, w: number, h: number, r: number): void {

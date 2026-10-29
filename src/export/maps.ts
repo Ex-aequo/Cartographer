@@ -427,19 +427,19 @@ export function tables(map: MapData): Record<string, string> {
         ]),
       );
     }
-  const provinces = ['province_id,name,region_id,region,realm_id,realm,terrain,coastal,hex_count,capital_hex,x,y,neighbors,sea_neighbors,sea_zones'];
+  const provinces = ['province_id,name,region_id,region,realm_id,realm,terrain,coastal,hex_count,capital_hex,x,y,neighbors,sea_neighbors,sea_zones,player,free'];
   const zonesOf = new Map<number, number[]>();
   for (const z of zones) for (const p of z.coast) zonesOf.set(p, [...(zonesOf.get(p) ?? []), z.id]);
   for (const p of map.provinces) {
     if (p.retired) continue;
     const g = map.regions[p.region];
     const r = map.realms[g.realm];
-    provinces.push(row([p.id, p.name, g.id, g.name, r.id, r.name, TERRAIN_NAMES[p.terrain], p.coastal, p.hexes.length, p.capitalHex, Math.round(p.center[0] * 1000) / 1000, Math.round(p.center[1] * 1000) / 1000, p.neighbors.join(' '), p.seaNeighbors.join(' '), (zonesOf.get(p.id) ?? []).join(' ')]));
+    provinces.push(row([p.id, p.name, g.id, g.name, r.id, r.name, TERRAIN_NAMES[p.terrain], p.coastal, p.hexes.length, p.capitalHex, Math.round(p.center[0] * 1000) / 1000, Math.round(p.center[1] * 1000) / 1000, p.neighbors.join(' '), p.seaNeighbors.join(' '), (zonesOf.get(p.id) ?? []).join(' '), r.player ?? '', !!r.unclaimed]));
   }
   const regions = ['region_id,name,realm_id,capital_province,provinces'];
   for (const g of map.regions) if (!g.retired) regions.push(row([g.id, g.name, g.realm, g.capitalProvince, g.provinces.join(' ')]));
-  const realms = ['realm_id,name,title,culture,race,color,capital_province,regions'];
-  for (const r of map.realms) if (!r.retired) realms.push(row([r.id, r.name, r.title, map.cultures[r.culture]?.name ?? '', r.race ?? '', '#' + r.color.map((c) => c.toString(16).padStart(2, '0')).join(''), r.capitalProvince, r.regions.join(' ')]));
+  const realms = ['realm_id,name,title,culture,race,color,capital_province,regions,player,unclaimed'];
+  for (const r of map.realms) if (!r.retired) realms.push(row([r.id, r.name, r.title, map.cultures[r.culture]?.name ?? '', r.race ?? '', '#' + r.color.map((c) => c.toString(16).padStart(2, '0')).join(''), r.capitalProvince, r.regions.join(' '), r.player ?? '', !!r.unclaimed]));
   const seas = ['sea_zone_id,name,kind,hex_count,coastal_provinces'];
   for (const z of zones) seas.push(row([z.id, z.name, z.kind, z.hexes.length, z.coast.join(' ')]));
   const out: Record<string, string> = {
