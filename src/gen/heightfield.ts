@@ -5,6 +5,16 @@ import { Simplex2, smoothstep, clamp } from '../util/noise';
 /** Texels per world unit for the art heightfield. */
 export const HEIGHT_RES = 3;
 
+/**
+ * 4X game maps have few, big hexes; their heightfield gets more texels per
+ * world unit so the land keeps the detail of a classic map of the same
+ * screen size.
+ */
+export function heightResFor(p: GenParams, worldW: number): number {
+  if (!p.game?.on) return HEIGHT_RES;
+  return Math.min(14, Math.max(HEIGHT_RES, Math.round((HEIGHT_RES * 520) / worldW)));
+}
+
 interface Blob {
   x: number;
   y: number;
@@ -37,25 +47,28 @@ export function generateHeightfield(p: GenParams, worldW: number, worldH: number
   const holes = p.template === 'inland-sea' ? makeInlandSea(blobs, rng.fork('holes')) : [];
   const ranges = makeRanges(blobs, p, aspect, rng.fork('ranges'));
 
-  const w = Math.ceil(worldW * HEIGHT_RES);
-  const h = Math.ceil(worldH * HEIGHT_RES);
+  const RES = heightResFor(p, worldW);
+  const w = Math.ceil(worldW * RES);
+  const h = Math.ceil(worldH * RES);
   const data = new Float32Array(w * h);
   const mtn = 0.25 + 0.9 * p.mountains;
 
   // Pass 1 (coarse, 1 texel per world unit): smooth large-scale quantities —
   // warp, continent mask, range influence, upland noise. These are the
   // expensive parts and vary slowly, so they are interpolated in pass 2.
-  const cw = Math.ceil(worldW) + 2;
-  const ch = Math.ceil(worldH) + 2;
+  // coarse texels per world unit: 1 on classic maps, more on small 4X maps
+  const C = RES / HEIGHT_RES;
+  const cw = Math.ceil(worldW * C) + 2;
+  const ch = Math.ceil(worldH * C) + 2;
   const cWx = new Float32Array(cw * ch);
   const cWy = new Float32Array(cw * ch);
   const cBase = new Float32Array(cw * ch);
   const cRidge = new Float32Array(cw * ch);
   const cUp = new Float32Array(cw * ch);
   for (let j = 0; j < ch; j++) {
-    const Y = j / worldH;
+    const Y = j / C / worldH;
     for (let i = 0; i < cw; i++) {
-      const X = i / worldH;
+      const X = i / C / worldH;
       // Domain warp: breaks the ellipses into believable coastlines.
       const wx = X + 0.075 * nWarp.fbm(X * 2.2, Y * 2.2, 4) + 0.02 * nWarp.fbm(X * 9 + 3, Y * 9, 3);
       const wy = Y + 0.075 * nWarp.fbm(X * 2.2 + 11, Y * 2.2 - 7, 4) + 0.02 * nWarp.fbm(X * 9, Y * 9 + 5, 3);
@@ -118,18 +131,18 @@ export function generateHeightfield(p: GenParams, worldW: number, worldH: number
 
   // Pass 2 (full resolution): fine detail and mountain crests.
   for (let j = 0; j < h; j++) {
-    const yw = (j + 0.5) / HEIGHT_RES;
+    const yw = (j + 0.5) / RES;
     const Y = yw / worldH;
     for (let i = 0; i < w; i++) {
-      const xw = (i + 0.5) / HEIGHT_RES;
+      const xw = (i + 0.5) / RES;
       const X = xw / worldH;
-      const wx = bil(cWx, xw, yw);
-      const wy = bil(cWy, xw, yw);
-      let v = bil(cBase, xw, yw);
+      const wx = bil(cWx, xw * C, yw * C);
+      const wy = bil(cWy, xw * C, yw * C);
+      let v = bil(cBase, xw * C, yw * C);
       v += 0.09 * nDetail.fbm(wx * 11, wy * 11, 4);
       const landish = smoothstep(-0.05, 0.35, v);
-      const ridgeInfl = bil(cRidge, xw, yw);
-      const up = bil(cUp, xw, yw);
+      const ridgeInfl = bil(cRidge, xw * C, yw * C);
+      const up = bil(cUp, xw * C, yw * C);
       // Mountain chains along range lines, plus scattered uplands.
       if (landish > 0.01 || ridgeInfl > 0.05) {
         const ridge = nRidge.ridged(wx * 7.5, wy * 7.5, 5);
@@ -144,7 +157,7 @@ export function generateHeightfield(p: GenParams, worldW: number, worldH: number
   }
 
   normalizeToSeaLevel(data, p.landFraction);
-  return { w, h, res: HEIGHT_RES, data };
+  return { w, h, res: RES, data };
 }
 
 function softMax(a: number, b: number, k: number): number {

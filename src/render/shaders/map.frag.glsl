@@ -600,6 +600,10 @@ float lineAA(float distPx, float halfWidthPx) {
 vec3 realmColor(float realmId) {
   return texture(tPalette, vec2((realmId + 0.5) / uPaletteSize, 0.5)).rgb;
 }
+// 0 for land nobody rules (free land on 4X maps)
+float realmClaimed(float realmId) {
+  return texture(tPalette, vec2((realmId + 0.5) / uPaletteSize, 0.5)).a;
+}
 
 // distance (world units) from p to the nearest hex edge
 float hexEdgeDist(vec2 p) {
@@ -866,9 +870,16 @@ void main() {
     float pool = 1.0 - smoothstep(0.0, mix(0.9, 0.35, 1.0 - paperMix), realmDist);
     float washPaper = 0.5 + 0.25 * pool;
     float washTerrain = 0.16 + 0.22 * pool;
-    float wash = mix(washTerrain, washPaper, paperMix) * uPolitical * landA;
+    float wash = mix(washTerrain, washPaper, paperMix) * uPolitical * landA * realmClaimed(realm);
     vec3 tinted = col * mix(vec3(1.0), rc * 1.4, 0.72);
     col = mix(col, tinted, wash);
+    // free land (4X maps): fine diagonal hatching, so it never reads as a pale kingdom
+    if (realmClaimed(realm) < 0.5) {
+      float period = 7.0 * uPixelRatio;
+      float d = abs(fract((gl_FragCoord.x + gl_FragCoord.y) / period) - 0.5) * period;
+      float hatch = 1.0 - smoothstep(0.35 * uPixelRatio, 0.35 * uPixelRatio + 1.0, d);
+      col = mix(col, vec3(0.30, 0.23, 0.16), hatch * mix(0.10, 0.22, paperMix) * uPolitical * landA);
+    }
   }
 
   // ---- province borders: hairlines, stronger when zoomed in
@@ -895,7 +906,7 @@ void main() {
   float realmLine = lineAA(realmPx, rw) * landA;
   if (realm > 0.5 && realmLine > 0.0) {
     vec3 rc = realmColor(realm);
-    vec3 edgeC = uPolitical > 0.0 ? mix(rc * 0.55, rc * 0.42, paperMix) : vec3(0.16, 0.12, 0.09);
+    vec3 edgeC = uPolitical > 0.0 && realmClaimed(realm) > 0.5 ? mix(rc * 0.55, rc * 0.42, paperMix) : vec3(0.16, 0.12, 0.09);
     col = mix(col, edgeC, realmLine * 0.92);
     float core = lineAA(realmPx, 0.5 * uPixelRatio) * landA;
     col = mix(col, vec3(0.10, 0.07, 0.05), core * 0.55);

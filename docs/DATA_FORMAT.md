@@ -246,3 +246,35 @@ realm's race for convenience.
 terrains) or `max` (at most). `csv/races.csv` lists each race's kingdoms, land
 and how many of its kingdoms meet all targets; `csv/realms.csv` has a `race`
 column.
+
+## 4X game maps
+
+A map drawn with *Map type: 4X game* has one kingdom per player, a fixed number
+of hexes per province and provinces per kingdom, and free land nobody rules.
+The game data adds:
+
+```jsonc
+"game": { "players": 24, "provincesPerKingdom": [3, 6], "hexesPerProvince": [3, 5],
+          "freeLand": 0.3, "balanced": true },   // null on classic maps
+"realms": [
+  { "id": 0, "name": "Despae", "title": "Kingdom", "player": 1, "unclaimed": false, ... },
+  { "id": 24, "name": "Free lands", "title": "Free lands", "player": null, "unclaimed": true, ... }
+],
+"provinces": [
+  { "id": 0, "realm": 3, "player": 4, "free": false, ... },
+  { "id": 1, "realm": 24, "player": null, "free": true, ... }
+]
+```
+
+- Every kingdom has a `player` slot, 1 to the number of players, numbered from
+  the top-left of the map. Free land belongs to one realm with `unclaimed: true`.
+- There is no region level in play: each kingdom has exactly one region with
+  the kingdom's name, and free land is grouped into one region per connected
+  stretch. The `regions[]` list is still there, so code written for classic maps
+  keeps working.
+- `csv/realms.csv` gains `player` and `unclaimed` columns, `csv/provinces.csv`
+  gains `player` and `free`.
+- Provinces with too few hexes (where the land cannot be cut evenly, such as a
+  lone islet with nowhere to join) and kingdoms outside the province interval
+  are rare; the World tab reports how many there are, and the inspector flags
+  each one.

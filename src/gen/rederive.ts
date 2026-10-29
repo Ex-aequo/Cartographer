@@ -1,5 +1,5 @@
 import type { EditLayers, HexLayers, MapData, Province, Realm, Region, River } from '../model/types';
-import { HexFlag } from '../model/types';
+import { HexFlag, isGameMap } from '../model/types';
 import { hexCenterX, hexCenterY } from '../model/hex';
 import { Rng } from '../util/rng';
 import { generateMoisture } from './climate';
@@ -118,9 +118,12 @@ function repairPolitical(old: MapData, hex: HexLayers, nbr: Int32Array, rivers: 
   // 3. Land with no province anywhere near it (a new island) becomes a province.
   forEachComponent(n, nbr, (i) => isLand(i) && prov[i] < 0, (comp) => newProvince(comp));
 
+  const game = isGameMap(old.meta.params);
   // 4. A province split in pieces keeps the piece with its settlement (else
   //    its largest); the other pieces join the neighbour they border most.
-  for (let pass = 0; pass < 2; pass++) {
+  //    4X maps skip this: their provinces may be made of pieces on purpose (an
+  //    islet joined to the coast across the water) and must keep their size.
+  for (let pass = 0; pass < (game ? 0 : 2); pass++) {
     const members: number[][] = provinces.map(() => []);
     for (let i = 0; i < n; i++) if (prov[i] >= 0) members[prov[i]].push(i);
     let changed = false;

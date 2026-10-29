@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { DEFAULT_PARAMS, type GenParams, type MapData } from './model/types';
+import { DEFAULT_PARAMS, isGameMap, type GenParams, type MapData } from './model/types';
 import { useMapWorker, type LoadedMap } from './state/useMapWorker';
 import { MapView, type MapViewHandle, type Pick } from './ui/MapView';
 import { SidePanel, WorldPanel, type PanelTab } from './ui/WorldPanel';
@@ -18,7 +18,7 @@ import { useEditor } from './state/useEditor';
 import { Inspector } from './ui/Inspector';
 import { Legend, ModeSwitch, Veil, View3D, ZoomLadder, cameraBus } from './ui/Controls';
 import { TopBar } from './ui/TopBar';
-import { LEVELS } from './ui/zoomLevels';
+import { levelsFor } from './ui/zoomLevels';
 import { layerIdOf, type MapMode } from './render/mapModes';
 import type { Quality } from './render/MapRenderer';
 import { gzip, mapToJSON } from './model/serialize';
@@ -51,6 +51,8 @@ export function App() {
   const [pick, setPick] = useState<Pick | null>(null);
   const [zoom, setZoom] = useState(1);
   const camBus = useMemo(() => cameraBus(), []);
+  // the map's zoom profile is set when it is shown, so the levels follow the loaded map
+  const levels = useMemo(() => levelsFor(isGameMap(loaded?.map.meta.params), loaded?.map.world), [loaded]);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState<DialogPart[] | null>(null);
   useEffect(() => {
@@ -280,6 +282,7 @@ export function App() {
           )
         ) : (
           <EditPanel
+            game={isGameMap(loaded?.map.meta.params)}
             settings={editor.settings}
             onSettings={setSettings}
             working={editor.working}
@@ -318,7 +321,8 @@ export function App() {
           onSelectProvince={(id) => {
             const p = loaded.map.provinces[id];
             setPick({ province: id, hex: p.capitalHex });
-            viewRef.current?.flyTo(Math.max(zoom, LEVELS[2].target), p.center[0], p.center[1]);
+            const lv = levelsFor(isGameMap(loaded.map.meta.params));
+            viewRef.current?.flyTo(Math.max(zoom, lv[lv.length - 2].target), p.center[0], p.center[1]);
           }}
         />
       )}
@@ -328,8 +332,9 @@ export function App() {
             zoom={zoom}
             onLevel={(i) => {
               if (i === 0) viewRef.current?.fit();
-              else viewRef.current?.flyTo(LEVELS[i].target);
+              else viewRef.current?.flyTo(levels[i].target);
             }}
+            levels={levels}
             onStep={(f) => viewRef.current?.flyTo(zoom * f)}
             top={<View3D bus={camBus} onChange={(p, a) => viewRef.current?.setCamera(p, a)} />}
           />

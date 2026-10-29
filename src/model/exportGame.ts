@@ -84,6 +84,10 @@ export function buildGameExport(map: MapData) {
     version: GAME_EXPORT_VERSION,
     name: map.meta.name,
     seed: map.meta.params.seed,
+    // 4X maps: the rules the map was made to (null on classic maps)
+    game: map.meta.params.game?.on
+      ? { players: map.realms.filter((r) => r.player).length, provincesPerKingdom: map.meta.params.game.provinces, hexesPerProvince: map.meta.params.game.hexes, freeLand: map.meta.params.game.free, balanced: map.meta.params.game.balanced }
+      : null,
     grid: { cols, rows, layout: map.grid.layout, hexRadius: 1, worldWidth: round(map.world.width, 3), worldHeight: round(map.world.height, 3) },
     terrainTypes: Object.entries(TERRAIN_NAMES).map(([code, name]) => ({ code: Number(code), name })),
     biomeTypes: Object.entries(BIOME_NAMES).map(([code, name]) => ({ code: Number(code), name })),
@@ -102,6 +106,9 @@ export function buildGameExport(map: MapData) {
       color: hex(r.color),
       capitalProvince: r.capitalProvince,
       regions: r.regions,
+      // 4X maps: the player slot (null for classic realms and free land), and whether nobody rules it
+      player: r.player ?? null,
+      unclaimed: !!r.unclaimed,
     })),
     regions: map.regions.map((g) => ({ id: g.id, retired: !!g.retired, name: g.name, realm: g.realm, capitalProvince: g.capitalProvince, provinces: g.provinces })),
     provinces: map.provinces.map((p) => ({
@@ -111,6 +118,8 @@ export function buildGameExport(map: MapData) {
       region: p.region,
       realm: map.regions[p.region].realm,
       race: raceOfProvince(p.id),
+      player: map.realms[map.regions[p.region].realm]?.player ?? null,
+      free: !!map.realms[map.regions[p.region].realm]?.unclaimed,
       capitalHex: p.capitalHex,
       center: [round(p.center[0], 3), round(p.center[1], 3)],
       terrain: TERRAIN_NAMES[p.terrain],

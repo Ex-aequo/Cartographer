@@ -2,7 +2,8 @@ import { raceOfRealm, racesOf } from '../model/races';
 import { t, num } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
 import type { MapData } from '../model/types';
-import { REALM_TITLES, newRealmFrom, newRegionFrom } from '../edit/political';
+import { REALM_TITLES, newRealmFrom, newRegionFrom, releaseProvince } from '../edit/political';
+import { isGameMap } from '../model/types';
 import { BIOME_NAMES, HexFlag, RELIEF_NAMES, TERRAIN_NAMES } from '../model/types';
 import { toAxial } from '../model/hex';
 import { DEPTH_METRES, ELEVATION_METRES } from '../gen/biomes';
@@ -31,6 +32,8 @@ export function Inspector({ map, pick, onClose, onSelectProvince, onChange, onLa
   const e = map.hex.elevation[i];
   const f = map.hex.flags[i];
   const rgb = realm ? `rgb(${realm.color.join(',')})` : undefined;
+  const game = map.meta.params.game?.on ? map.meta.params.game : null;
+  const kingdomSize = realm ? realm.regions.reduce((a, k) => a + map.regions[k].provinces.length, 0) : 0;
 
   return (
     <aside className="panel panel--inspector" aria-label={t('Inspector')}>
@@ -41,7 +44,25 @@ export function Inspector({ map, pick, onClose, onSelectProvince, onChange, onLa
         </button>
       </header>
       <div className="panel__body">
-        {realm && region && prov && (
+        {game && realm && region && prov && (
+          <div className="heraldry">
+            <span className={`shield ${realm.unclaimed ? 'shield--free' : ''}`} style={realm.unclaimed ? undefined : { background: rgb }} aria-hidden />
+            <div>
+              <p className="heraldry__realm">{realm.unclaimed ? t('Free land') : t('{title} of {name}', { title: t(realm.title), name: realm.name })}</p>
+              <p className="muted">
+                {realm.unclaimed ? t('Nobody rules it yet: open for expansion.') : t('Player {n} · {count} provinces, {culture} culture', { n: realm.player ?? '–', count: kingdomSize, culture: map.cultures[realm.culture]?.name ?? '' })}
+              </p>
+              {raceOfRealm(map, realm.id) && <p className="muted">{t('Race: {name}', { name: raceOfRealm(map, realm.id)!.name })}</p>}
+              {(prov.hexes.length < game.hexes[0] || prov.hexes.length > game.hexes[1]) && (
+                <p className="warn">{t('This province has {n} hexes; the game asks for {a} to {b}.', { n: prov.hexes.length, a: game.hexes[0], b: game.hexes[1] })}</p>
+              )}
+              {!realm.unclaimed && (kingdomSize < game.provinces[0] || kingdomSize > game.provinces[1]) && (
+                <p className="warn">{t('This kingdom has {n} provinces; the game asks for {a} to {b}.', { n: kingdomSize, a: game.provinces[0], b: game.provinces[1] })}</p>
+              )}
+            </div>
+          </div>
+        )}
+        {!game && realm && region && prov && (
           <div className="heraldry">
             <span className="shield" style={{ background: rgb }} aria-hidden />
             <div>
@@ -74,13 +95,13 @@ export function Inspector({ map, pick, onClose, onSelectProvince, onChange, onLa
         {prov && prov.neighbors.length > 0 && (
           <div className="chips">
             <h3>{t('Borders')}</h3>
-            {prov.neighbors.map((n) => (
+            {prov.neighbors.filter((n) => map.provinces[n]).map((n) => (
               <button key={n} className="chip" onClick={() => onSelectProvince(n)}>
                 {map.provinces[n].name}
               </button>
             ))}
             {prov.seaNeighbors.length > 0 && <h3>{t('Across the water')}</h3>}
-            {prov.seaNeighbors.map((n) => (
+            {prov.seaNeighbors.filter((n) => map.provinces[n]).map((n) => (
               <button key={n} className="chip chip--sea" onClick={() => onSelectProvince(n)}>
                 {map.provinces[n].name}
               </button>
@@ -256,6 +277,7 @@ function EditNames({ map, provinceId, onChange }: { map: MapData; provinceId: nu
   const region = map.regions[prov.region];
   const realm = map.realms[region.realm];
   const titles = REALM_TITLES.includes(realm.title) ? REALM_TITLES : [realm.title, ...REALM_TITLES];
+  if (isGameMap(map.meta.params)) return <EditGameNames map={map} provinceId={provinceId} onChange={onChange} />;
   return (
     <div className="names">
       <NameField label={t('Province')} value={prov.name} onCommit={(v) => onChange(t('Rename province'), (m) => (m.provinces[prov.id].name = v))} />
@@ -305,6 +327,64 @@ function EditNames({ map, provinceId, onChange }: { map: MapData; provinceId: nu
           {t('Make {name} an independent realm', { name: region.name })}
         </button>
       </div>
+    </div>
+  );
+}
+
+/** 4X maps: province and kingdom names, colour, race, and giving a province back to the free land. */
+function EditGameNames({ map, provinceId, onChange }: { map: MapData; provinceId: number; onChange: (label: string, mutate: (m: MapData) => void) => void }) {
+  const prov = map.provinces[provinceId];
+  const realm = map.realms[map.regions[prov.region].realm];
+  return (
+    <div className="names">
+      <NameField label={t('Province')} value={prov.name} onCommit={(v) => onChange(t('Rename province'), (m) => (m.provinces[prov.id].name = v))} />
+      {!realm.unclaimed && (
+        <>
+          <div className="names__row">
+            <NameField
+              label={t('Kingdom')}
+              value={realm.name}
+              onCommit={(v) =>
+                onChange(t('Rename kingdom'), (m) => {
+                  m.realms[realm.id].name = v;
+                  // the kingdom's own region carries the same name
+                  for (const k of m.realms[realm.id].regions) m.regions[k].name = v;
+                })
+              }
+            />
+            <ColorField color={realm.color} onCommit={(c) => onChange(t('Recolour kingdom'), (m) => (m.realms[realm.id].color = c))} />
+          </div>
+          {racesOf(map).length > 0 && (
+            <label className="field">
+              <span>{t('Race')}</span>
+              <select
+                value={realm.race ?? ''}
+                onChange={(e) =>
+                  onChange(t('Change race'), (m) => {
+                    if (e.target.value) m.realms[realm.id].race = e.target.value;
+                    else delete m.realms[realm.id].race;
+                  })
+                }
+              >
+                <option value="">{t('Unaligned')}</option>
+                {racesOf(map)
+                  .filter((r) => r.enabled || r.id === realm.race)
+                  .map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+          )}
+          <div className="names__actions">
+            <button type="button" className="btn btn--ghost" disabled={realm.capitalProvince === prov.id} title={realm.capitalProvince === prov.id ? t('A kingdom keeps its capital.') : undefined} onClick={() => onChange(t('Free {name}', { name: prov.name }), (m) => void releaseProvince(m, prov.id))}>
+              {t('Give {name} back to the free land', { name: prov.name })}
+            </button>
+          </div>
+        </>
+      )}
+      {realm.unclaimed && <p className="hint">{t('To claim it, use Change kingdom in the Edit tools: start inside a kingdom and drag across this province.')}</p>}
     </div>
   );
 }

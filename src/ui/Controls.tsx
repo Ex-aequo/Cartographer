@@ -3,10 +3,10 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { DEFAULT_CAMERA, MAX_TILT, wrapAngle, type Camera3D } from '../render/camera';
 import { MODES, categoriesFor, isLayerMode, modeDef, rampFor, type MapMode } from '../render/mapModes';
 import { formatValue, numberRange, type DataLayer } from '../model/layers';
-import { LEVELS, levelIndexFor } from './zoomLevels';
+import { LEVELS, levelIndexFor, type ZoomLevel } from './zoomLevels';
 
-export function ZoomLadder({ zoom, onLevel, onStep, top }: { zoom: number; onLevel(i: number): void; onStep(f: number): void; top?: ReactNode }) {
-  const active = levelIndexFor(zoom);
+export function ZoomLadder({ zoom, onLevel, onStep, top, levels = LEVELS }: { zoom: number; onLevel(i: number): void; onStep(f: number): void; top?: ReactNode; levels?: ZoomLevel[] }) {
+  const active = levelIndexFor(zoom, levels);
   return (
     <nav className="ladder" aria-label={t('Zoom level')}>
       {top}
@@ -14,10 +14,11 @@ export function ZoomLadder({ zoom, onLevel, onStep, top }: { zoom: number; onLev
         +
       </button>
       <ol>
-        {LEVELS.slice()
+        {levels
+          .slice()
           .reverse()
           .map((l) => {
-            const i = LEVELS.indexOf(l);
+            const i = levels.indexOf(l);
             return (
               <li key={l.key}>
                 <button className={i === active ? 'is-on' : ''} onClick={() => onLevel(i)} title={t(l.hint)} aria-current={i === active ? 'true' : undefined}>
