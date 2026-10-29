@@ -28,6 +28,7 @@ uniform sampler2D tFarm;     // cultivation 0..1, 1 texel per world unit (linear
 uniform vec2 uFarmSpan;
 uniform sampler2D tHexAux;   // per hex: RG region+1, B biome, A terrain (nearest)
 uniform sampler2D tHexData;  // per hex: elevation, temperature, moisture, flags (float, nearest)
+uniform sampler2D tHexLayer; // per hex: custom layer colour, alpha = has a value (nearest)
 uniform sampler2D tWarp;     // RG border warp offset, world units (linear)
 uniform vec2 uWarpSize;      // texels; grid point i sits at world i / 2
 uniform float uSigma2;       // border smoothing kernel (shrinks toward hex edges at hex zoom)
@@ -47,7 +48,7 @@ uniform float uHexGrid;      // 0..1 visibility
 uniform float uLapse;
 uniform float uRelief;
 uniform float uDebug;
-uniform float uDataMode;     // 0 art, 1 continuous ramp, 2 categories
+uniform float uDataMode;     // 0 art, 1 continuous ramp, 2 categories, 3 custom layer
 uniform float uSource;       // 0 elevation, 1 temperature, 2 moisture, 3 biome, 4 terrain
 uniform int uRampN;
 uniform float uRampPos[9];
@@ -778,7 +779,13 @@ void main() {
     vec4 aux = texelFetch(tHexAux, hh, 0) * 255.0;
     bool hexLand = mod(d.a, 2.0) > 0.5;
     vec3 dc;
-    if (uDataMode < 1.5) {
+    if (uDataMode > 2.5) {
+      // custom layer: a faded, greyed map with the layer's colours laid over
+      float lum = dot(col, vec3(0.3, 0.55, 0.15));
+      vec3 base = land ? mix(vec3(lum), vec3(0.93, 0.89, 0.80), 0.55) : mix(col, vec3(0.62, 0.68, 0.72), 0.55);
+      vec4 lc = texelFetch(tHexLayer, hh, 0);
+      dc = mix(base, lc.rgb, lc.a);
+    } else if (uDataMode < 1.5) {
       float v = uSource < 0.5 ? d.r : (uSource < 1.5 ? d.g : d.b);
       dc = uRampCol[0];
       for (int k = 1; k < 9; k++) {

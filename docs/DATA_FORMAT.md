@@ -42,7 +42,7 @@ Two files come out of Cartographer:
   "cultures": [ ... ],
   "rivers":   [ ... ],
   "hexes":    [ ... ],
-  "layers":   []          // custom data layers (Phase 3)
+  "layers":   [ ... ]     // definitions of your custom data layers
 }
 ```
 
@@ -68,6 +68,7 @@ Two files come out of Cartographer:
 | `province` | int | Province id, −1 for water. |
 | `edited` | bool | Changed by hand in the editor (height, terrain or river). |
 | `paintedTerrain` | bool | `terrain` was set by hand and overrides the climate. |
+| `data` | object | Values of every per-hex custom layer, keyed by layer id (see *Custom data layers*). |
 
 Codes are stable: a code is never renumbered, new codes are only added.
 
@@ -84,7 +85,8 @@ Codes are stable: a code is never renumbered, new codes are only added.
 | `neighbors` | Provinces sharing a land border. |
 | `seaNeighbors` | Provinces across at most four hexes of water (for naval movement). |
 
-Each province also carries `retired` (see below).
+Each province also carries `retired` (see below) and `data`, the values of every
+per-province custom layer keyed by layer id.
 
 ### Retired ids
 
@@ -104,3 +106,53 @@ same way. The top-level `retired` object lists the retired ids of each kind:
   County), `culture`, `color` (`#rrggbb`), `capitalProvince`, `regions`.
 - **cultures**: `id`, `name`.
 - **rivers**: `id`, `name`, `hexes` from source to the water or river it joins.
+
+## Custom data layers
+
+Layers you define in the Data tab (resources, fertility, danger, holy sites …)
+are listed in `layers[]` and their values sit under `data` on each hex or
+province:
+
+```jsonc
+"layers": [
+  { "id": "resource", "name": "Resource", "type": "category", "scope": "hex",
+    "categories": [{ "id": 0, "name": "Iron", "color": "#787882" }, ...] },
+  { "id": "fertility", "name": "Fertility", "type": "number", "scope": "hex",
+    "min": 0, "max": 10, "decimals": 0 },
+  { "id": "harvest", "name": "Harvest", "type": "number", "scope": "province",
+    "rollUp": { "source": "fertility", "how": "sum" } }
+],
+"hexes": [ { "id": 0, ..., "data": { "resource": 0, "fertility": 7 } }, ... ],
+"provinces": [ { "id": 0, ..., "data": { "harvest": 212 } }, ... ]
+```
+
+| `type` | Value in `data` |
+| --- | --- |
+| `category` | Category id, or `null` for none. |
+| `number` | Number, rounded to `decimals`. |
+| `flag` | `true` or `false`. |
+| `tags` | Array of tag (category) ids, possibly empty. |
+
+Layer ids are stable once created (renaming a layer keeps its id). Category
+ids are never renumbered; removing a category clears its values.
+
+`rollUp.how` is one of `sum`, `average`, `max`, `min`, `mode` (most common
+value) or `any` (1 if any hex has a value).
+
+### Layer CSV tables
+
+*Export → Data layers* (or *CSV tables* in the Data tab) downloads a zip with
+one CSV per layer, named `<layer id>.csv`:
+
+- per-hex layers: `hex_id,col,row,q,r,value,label,set_by_hand`, one row per land hex;
+- per-province layers: `province_id,province,value,label,set_by_hand`, one row
+  per live province.
+
+`value` is the raw value (tags as a bit mask: bit *n* set = tag id *n*),
+`label` the readable form, and `set_by_hand` is 1 where the value was painted.
+
+### Layer templates
+
+*Save template* writes the layer definitions and rules without any map's
+values (`format: "cartographer-layer-template"`), so the same layers can be
+loaded onto other maps, where the rules fill them from that map's land.

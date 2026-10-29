@@ -1,3 +1,5 @@
+import type { DataLayer } from './layers';
+
 /**
  * Cartographer map data model.
  *
@@ -296,8 +298,8 @@ export interface MapData {
   realms: Realm[];
   cultures: Culture[];
   rivers: River[];
-  /** Custom game data layers (Phase 3). Kept in the format from day one. */
-  layers: unknown[];
+  /** Custom game data layers (see model/layers.ts). */
+  layers: DataLayer[];
   /** Hand edits (format 3). Absent on maps nobody has edited. */
   edits?: EditLayers;
   /** Hand-placed labels (format 3). */

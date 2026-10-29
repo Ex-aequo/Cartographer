@@ -1,4 +1,5 @@
 import type { LabelEdit, MapData } from '../model/types';
+import { layersOf, rollUps, runRules, type DataLayer } from '../model/layers';
 import { HexFlag, Terrain, Touched } from '../model/types';
 import { hexAt, hexCenterX, hexCenterY, sampleField } from '../model/hex';
 import { ensureEdits } from '../gen/rederive';
@@ -19,7 +20,8 @@ export type ToolId =
   | 'merge'
   | 'region'
   | 'realm'
-  | 'label';
+  | 'label'
+  | 'layer';
 
 export interface ToolSettings {
   tool: ToolId | null;
@@ -28,6 +30,10 @@ export interface ToolSettings {
   /** 0..1 */
   strength: number;
   terrain: Terrain;
+  /** layer brush: which layer, what value (NaN = give back to the rules), tags add or remove */
+  layer?: string | null;
+  layerValue?: number;
+  tagMode?: 'add' | 'remove';
 }
 
 export const TOOL_LABELS: Record<ToolId, string> = {
@@ -46,6 +52,7 @@ export const TOOL_LABELS: Record<ToolId, string> = {
   region: 'Change region',
   realm: 'Change realm',
   label: 'Move labels',
+  layer: 'Paint values',
 };
 
 /** Tools that draw a line (collected as points, applied when the stroke ends). */
@@ -85,8 +92,9 @@ export interface PoliticalCore {
 
 export interface StepRecord {
   label: string;
-  /** 'labels': only label placement changed, nothing to rebuild */
-  kind?: 'labels';
+  /** 'instant': only labels or data layers changed, nothing to rebuild */
+  kind?: 'instant';
+  layers?: LayerStep;
   height?: { x: number; y: number; w: number; h: number; before: Float32Array; after: Float32Array };
   terrain?: Diff;
   riverBlock?: Diff;
@@ -120,6 +128,7 @@ interface Stroke {
   /** province, region or realm being extended (border tools) */
   target: number;
   labelKey?: string;
+  layersBefore?: LayerSnapshot;
 }
 
 const MAX_UNDO = 100;
@@ -128,6 +137,75 @@ export interface ChangeToken {
   provinceBefore: Int32Array;
   coreBefore: PoliticalCore;
   paths: number[][];
+  layers: LayerSnapshot;
+}
+
+interface LayerArrays {
+  values: Float32Array;
+  locked: Uint8Array;
+}
+export interface LayerSnapshot {
+  defs: string;
+  arrays: Map<string, LayerArrays>;
+}
+interface LayerChange {
+  id: string;
+  /** whole arrays when the layer appeared, disappeared or changed size */
+  before?: LayerArrays | null;
+  after?: LayerArrays | null;
+  values?: Diff;
+  locked?: Diff;
+}
+export interface LayerStep {
+  defsBefore: string;
+  defsAfter: string;
+  changes: LayerChange[];
+}
+
+export function snapshotLayers(map: MapData): LayerSnapshot {
+  const arrays = new Map<string, LayerArrays>();
+  for (const l of layersOf(map)) arrays.set(l.def.id, { values: l.values.slice(), locked: l.locked.slice() });
+  return { defs: JSON.stringify(layersOf(map).map((l) => l.def)), arrays };
+}
+
+function layerStep(snap: LayerSnapshot, map: MapData): LayerStep | undefined {
+  const defsAfter = JSON.stringify(layersOf(map).map((l) => l.def));
+  const ids = new Set([...snap.arrays.keys(), ...layersOf(map).map((l) => l.def.id)]);
+  const changes: LayerChange[] = [];
+  for (const id of ids) {
+    const b = snap.arrays.get(id) ?? null;
+    const cur = layersOf(map).find((l) => l.def.id === id);
+    const a = cur ? { values: cur.values, locked: cur.locked } : null;
+    if (!a || !b || a.values.length !== b.values.length) {
+      changes.push({ id, before: b, after: a ? { values: a.values.slice(), locked: a.locked.slice() } : null });
+      continue;
+    }
+    const values = diff(b.values, a.values);
+    const locked = diff(b.locked, a.locked);
+    if (values || locked) changes.push({ id, values, locked });
+  }
+  if (!changes.length && defsAfter === snap.defs) return undefined;
+  return { defsBefore: snap.defs, defsAfter, changes };
+}
+
+function applyLayerStep(map: MapData, step: LayerStep, side: 'before' | 'after'): void {
+  const defs: DataLayer['def'][] = JSON.parse(side === 'before' ? step.defsBefore : step.defsAfter);
+  const current = new Map(layersOf(map).map((l) => [l.def.id, l]));
+  const byId = new Map(step.changes.map((c) => [c.id, c]));
+  map.layers = defs.map((def) => {
+    const c = byId.get(def.id);
+    const cur = current.get(def.id);
+    if (c && (c.before !== undefined || c.after !== undefined)) {
+      const arr = side === 'before' ? c.before : c.after;
+      if (arr) return { def, values: arr.values.slice(), locked: arr.locked.slice() };
+    }
+    const layer: DataLayer = cur ? { def, values: cur.values, locked: cur.locked } : { def, values: new Float32Array(0), locked: new Uint8Array(0) };
+    if (c) {
+      applyDiff(layer.values, c.values, side);
+      applyDiff(layer.locked, c.locked, side);
+    }
+    return layer;
+  });
 }
 
 /**
@@ -170,6 +248,10 @@ export class EditSession {
       return;
     }
     if (settings.tool === 'label' && !ctx.labelKey) return;
+    if (settings.tool === 'layer' && !layersOf(map).some((l) => l.def.id === settings.layer)) {
+      this.message = 'Pick a data layer to paint first.';
+      return;
+    }
     const isHeight = HEIGHT_TOOLS.includes(settings.tool) || settings.tool === 'river';
     this.stroke = {
       map,
@@ -188,6 +270,7 @@ export class EditSession {
       hexes: new Set(),
       target,
       labelKey: ctx.labelKey,
+      layersBefore: settings.tool === 'layer' ? snapshotLayers(map) : undefined,
     };
     this.dab(x, y);
   }
@@ -248,9 +331,16 @@ export class EditSession {
       const r = mergeProvinces(map, a >= 0 ? map.hex.province[a] : -1, b >= 0 ? map.hex.province[b] : -1);
       if (!r.ok) this.message = r.message;
     }
+    if (tool === 'layer') {
+      // values given back to the rules get their rule value again
+      const l = layersOf(map).find((x) => x.def.id === s.settings.layer);
+      if (l && Number.isNaN(s.settings.layerValue)) runRules(map, l);
+      rollUps(map);
+    }
     const rec: StepRecord = {
       label: TOOL_LABELS[tool],
-      kind: tool === 'label' ? 'labels' : undefined,
+      kind: tool === 'label' || tool === 'layer' ? 'instant' : undefined,
+      layers: s.layersBefore ? layerStep(s.layersBefore, map) : undefined,
       riverPathsBefore: s.riverPathsBefore,
       riverPathsAfter: e.riverPaths.map((p) => p.slice()),
       coreBefore: s.coreBefore,
@@ -279,7 +369,7 @@ export class EditSession {
    * One undoable change made outside a brush stroke (renaming, recolouring,
    * a new region, a label setting). `mutate` changes the map in place.
    */
-  change(map: MapData, label: string, mutate: () => void, kind?: 'labels'): StepRecord | null {
+  change(map: MapData, label: string, mutate: () => void, kind?: 'instant'): StepRecord | null {
     if (this.stroke) return null;
     const t = this.startChange(map);
     mutate();
@@ -289,11 +379,20 @@ export class EditSession {
   /** Two-part change, for controls that adjust live (sliders) and record once at the end. */
   startChange(map: MapData): ChangeToken {
     const e = ensureEdits(map);
-    return { provinceBefore: map.hex.province.slice(), coreBefore: captureCore(map), paths: e.riverPaths.map((p) => p.slice()) };
+    return { provinceBefore: map.hex.province.slice(), coreBefore: captureCore(map), paths: e.riverPaths.map((p) => p.slice()), layers: snapshotLayers(map) };
   }
 
-  finishChange(map: MapData, t: ChangeToken, label: string, kind?: 'labels'): StepRecord | null {
-    const rec: StepRecord = { label, kind, riverPathsBefore: t.paths, riverPathsAfter: t.paths, coreBefore: t.coreBefore, provinceBefore: t.provinceBefore };
+  finishChange(map: MapData, t: ChangeToken, label: string, kind?: 'instant'): StepRecord | null {
+    if (kind === 'instant') rollUps(map);
+    const rec: StepRecord = {
+      label,
+      kind,
+      riverPathsBefore: t.paths,
+      riverPathsAfter: t.paths,
+      coreBefore: t.coreBefore,
+      provinceBefore: t.provinceBefore,
+      layers: layerStep(t.layers, map),
+    };
     return isEmpty(rec, map) ? null : rec;
   }
 
@@ -332,6 +431,27 @@ export class EditSession {
     const map = s.map;
     const e = ensureEdits(map);
     if (tool === 'river' || tool === 'split' || tool === 'merge' || tool === 'label') return false;
+    if (tool === 'layer') {
+      const l = layersOf(map).find((x) => x.def.id === s.settings.layer);
+      if (!l) return false;
+      const v = s.settings.layerValue ?? 0;
+      forHexesInRadius(map, x, y, radius, (h) => {
+        if (!(map.hex.flags[h] & HexFlag.Land)) return;
+        const idx = l.def.scope === 'hex' ? h : map.hex.province[h];
+        if (idx < 0) return;
+        if (Number.isNaN(v)) l.locked[idx] = 0;
+        else {
+          if (l.def.type === 'tags') {
+            const bit = 1 << v;
+            l.values[idx] = s.settings.tagMode === 'remove' ? (l.values[idx] & ~bit) >>> 0 : ((l.values[idx] | bit) >>> 0);
+          } else l.values[idx] = v;
+          l.locked[idx] = 1;
+        }
+        if (l.def.scope === 'hex') s.hexes.add(h);
+        else for (const q of map.provinces[idx].hexes) s.hexes.add(q);
+      });
+      return false;
+    }
     if (tool === 'assign' || tool === 'region' || tool === 'realm') {
       const hexes: number[] = [];
       forHexesInRadius(map, x, y, radius, (h) => hexes.push(h));
@@ -515,7 +635,7 @@ export function captureCore(map: MapData): PoliticalCore {
 }
 
 function isEmpty(rec: StepRecord, map: MapData): boolean {
-  if (rec.height || rec.terrain || rec.riverBlock) return false;
+  if (rec.height || rec.terrain || rec.riverBlock || rec.layers) return false;
   if (JSON.stringify(rec.riverPathsBefore) !== JSON.stringify(rec.riverPathsAfter)) return false;
   if (rec.provinceBefore && diff(rec.provinceBefore, map.hex.province)) return false;
   return JSON.stringify(rec.coreBefore) === JSON.stringify(captureCore(map));
@@ -546,6 +666,7 @@ function applyStep(map: MapData, rec: StepRecord, side: 'before' | 'after'): voi
   e.riverPaths = (side === 'before' ? rec.riverPathsBefore : rec.riverPathsAfter).map((p) => p.slice());
   const core = side === 'before' ? rec.coreBefore : rec.coreAfter;
   if (core) applyCore(map, core);
+  if (rec.layers) applyLayerStep(map, rec.layers, side);
 }
 
 function diff(a: ArrayLike<number>, b: ArrayLike<number>): Diff | undefined {

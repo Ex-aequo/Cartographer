@@ -23,7 +23,13 @@ const CLIMATES = [
   { label: 'Warm south, cold north', north: 31, south: -14 },
 ];
 
-export type PanelTab = 'world' | 'edit';
+export type PanelTab = 'world' | 'edit' | 'data';
+
+const TABS: { key: PanelTab; label: string }[] = [
+  { key: 'world', label: 'New world' },
+  { key: 'edit', label: 'Edit' },
+  { key: 'data', label: 'Data' },
+];
 
 interface PanelProps {
   tab: PanelTab;
@@ -31,19 +37,18 @@ interface PanelProps {
   children: React.ReactNode;
 }
 
-/** The left panel: drawing a new world, or editing this one. */
+/** The left panel: drawing a new world, editing this one, or its game data. */
 export function SidePanel({ tab, onTab, children }: PanelProps) {
   const [open, setOpen] = useState(true);
   return (
-    <section className={`panel panel--world ${open ? '' : 'panel--closed'}`} aria-label={tab === 'world' ? 'New world' : 'Edit'}>
+    <section className={`panel panel--world ${open ? '' : 'panel--closed'}`} aria-label={TABS.find((t) => t.key === tab)?.label}>
       <header className="panel__head">
         <div className="tabs" role="tablist">
-          <button role="tab" aria-selected={tab === 'world'} className={tab === 'world' ? 'is-on' : ''} onClick={() => (onTab('world'), setOpen(true))}>
-            New world
-          </button>
-          <button role="tab" aria-selected={tab === 'edit'} className={tab === 'edit' ? 'is-on' : ''} onClick={() => (onTab('edit'), setOpen(true))}>
-            Edit
-          </button>
+          {TABS.map((t) => (
+            <button key={t.key} role="tab" aria-selected={tab === t.key} className={tab === t.key ? 'is-on' : ''} onClick={() => (onTab(t.key), setOpen(true))}>
+              {t.label}
+            </button>
+          ))}
         </div>
         <button className="icon-btn" onClick={() => setOpen(!open)} aria-expanded={open} aria-label={open ? 'Collapse panel' : 'Expand panel'}>
           {open ? '−' : '+'}

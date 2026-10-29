@@ -5,6 +5,7 @@ import { BIOME_NAMES, HexFlag, RELIEF_NAMES, TERRAIN_NAMES } from '../model/type
 import { toAxial } from '../model/hex';
 import { DEPTH_METRES, ELEVATION_METRES } from '../gen/biomes';
 import type { Pick } from './MapView';
+import { formatValue, runRules, type DataLayer } from '../model/layers';
 
 interface Props {
   map: MapData;
@@ -13,9 +14,11 @@ interface Props {
   onSelectProvince(id: number): void;
   /** set while the Edit tab is open: names, titles and colours become editable */
   onChange?: (label: string, mutate: (map: MapData) => void) => void;
+  /** set while the Edit or Data tab is open: layer values become editable */
+  onLayerChange?: (label: string, mutate: (map: MapData) => void, kind?: 'instant') => void;
 }
 
-export function Inspector({ map, pick, onClose, onSelectProvince, onChange }: Props) {
+export function Inspector({ map, pick, onClose, onSelectProvince, onChange, onLayerChange }: Props) {
   const prov = pick.province >= 0 ? map.provinces[pick.province] : null;
   const region = prov ? map.regions[prov.region] : null;
   const realm = region ? map.realms[region.realm] : null;
@@ -109,8 +112,136 @@ export function Inspector({ map, pick, onClose, onSelectProvince, onChange }: Pr
             </>
           ) : null}
         </dl>
+
+        {(map.layers ?? []).length > 0 && (
+          <>
+            <h3>Game data</h3>
+            <dl className="facts facts--data">
+              {map.layers.map((l) => {
+                const idx = l.def.scope === 'hex' ? i : pick.province;
+                if (idx < 0 || (l.def.scope === 'hex' && !(f & HexFlag.Land))) return null;
+                return <LayerValue key={l.def.id} layer={l} idx={idx} onChange={onLayerChange} />;
+              })}
+            </dl>
+          </>
+        )}
       </div>
     </aside>
+  );
+}
+
+function LayerValue({ layer, idx, onChange }: { layer: DataLayer; idx: number; onChange?: Props['onLayerChange'] }) {
+  const def = layer.def;
+  const v = layer.values[idx];
+  const locked = layer.locked[idx] === 1;
+  const set = (nv: number | null) =>
+    onChange?.(
+      `Set ${def.name}`,
+      (m) => {
+        const l = m.layers.find((x) => x.def.id === def.id);
+        if (!l) return;
+        if (nv === null) {
+          l.locked[idx] = 0;
+          runRules(m, l);
+        } else {
+          l.values[idx] = nv;
+          l.locked[idx] = 1;
+        }
+      },
+      'instant',
+    );
+  const label = (
+    <dt title={def.scope === 'province' ? 'Per province' : 'Per hex'}>
+      {def.name}
+      {def.scope === 'province' && <small> (province)</small>}
+    </dt>
+  );
+  const fromRollUp = def.scope === 'province' && !!def.rollUp && !locked;
+  if (!onChange)
+    return (
+      <>
+        {label}
+        <dd>
+          {formatValue(def, v)}
+          {locked && <span className="painted" title="Set by hand"> ✎</span>}
+        </dd>
+      </>
+    );
+  let control: React.ReactNode;
+  switch (def.type) {
+    case 'category':
+      control = (
+        <select value={v} onChange={(e) => set(Number(e.target.value))} aria-label={def.name}>
+          <option value={-1}>—</option>
+          {def.categories.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+      );
+      break;
+    case 'flag':
+      control = (
+        <label className="check check--tight">
+          <input type="checkbox" checked={v !== 0} onChange={(e) => set(e.target.checked ? 1 : 0)} aria-label={def.name} />
+          {v ? 'Yes' : 'No'}
+        </label>
+      );
+      break;
+    case 'tags':
+      control = (
+        <span className="chips chips--tight">
+          {def.categories.map((c) => {
+            const on = ((v >>> 0) & (1 << c.id)) !== 0;
+            return (
+              <button key={c.id} type="button" className={`chip ${on ? 'is-on' : ''}`} aria-pressed={on} onClick={() => set(on ? (v & ~(1 << c.id)) >>> 0 : ((v | (1 << c.id)) >>> 0))}>
+                {c.name}
+              </button>
+            );
+          })}
+        </span>
+      );
+      break;
+    default:
+      control = <NumberValue value={v} decimals={def.decimals} min={def.rollUp ? -Infinity : def.min} max={def.rollUp ? Infinity : def.max} onCommit={(nv) => set(nv)} label={def.name} />;
+  }
+  return (
+    <>
+      {label}
+      <dd className="layer-value">
+        {control}
+        {locked ? (
+          <button type="button" className="icon-btn" title="Set by hand. Click to let the rules decide again." aria-label={`Let the rules decide ${def.name}`} onClick={() => set(null)}>
+            ↺
+          </button>
+        ) : fromRollUp ? (
+          <span className="muted small" title="Worked out from the province's hexes">
+            Σ
+          </span>
+        ) : null}
+      </dd>
+    </>
+  );
+}
+
+function NumberValue({ value, decimals, min, max, onCommit, label }: { value: number; decimals: number; min: number; max: number; onCommit(v: number): void; label: string }) {
+  const [draft, setDraft] = useState(value.toFixed(decimals));
+  useEffect(() => setDraft(value.toFixed(decimals)), [value, decimals]);
+  return (
+    <input
+      className="num-input"
+      inputMode="decimal"
+      value={draft}
+      aria-label={label}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        const n = Number(draft.replace(',', '.'));
+        if (Number.isFinite(n) && n.toFixed(decimals) !== value.toFixed(decimals)) onCommit(Math.min(max, Math.max(min, Math.round(n * 10 ** decimals) / 10 ** decimals)));
+        else setDraft(value.toFixed(decimals));
+      }}
+      onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+    />
   );
 }
 

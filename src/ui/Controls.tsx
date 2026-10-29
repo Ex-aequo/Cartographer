@@ -1,4 +1,5 @@
-import { MODES, categoriesFor, modeDef, rampFor, type MapMode } from '../render/mapModes';
+import { MODES, categoriesFor, isLayerMode, modeDef, rampFor, type MapMode } from '../render/mapModes';
+import { formatValue, numberRange, type DataLayer } from '../model/layers';
 import { LEVELS, levelIndexFor } from './zoomLevels';
 
 export function ZoomLadder({ zoom, onLevel, onStep }: { zoom: number; onLevel(i: number): void; onStep(f: number): void }) {
@@ -30,7 +31,7 @@ export function ZoomLadder({ zoom, onLevel, onStep }: { zoom: number; onLevel(i:
   );
 }
 
-export function ModeSwitch({ mode, onMode }: { mode: MapMode; onMode(m: MapMode): void }) {
+export function ModeSwitch({ mode, onMode, layers }: { mode: MapMode; onMode(m: MapMode): void; layers: { id: string; name: string }[] }) {
   const art = MODES.filter((m) => m.kind === 'art');
   const data = MODES.filter((m) => m.kind === 'data');
   const btn = (m: (typeof MODES)[number]) => (
@@ -43,11 +44,14 @@ export function ModeSwitch({ mode, onMode }: { mode: MapMode; onMode(m: MapMode)
       {art.map(btn)}
       <span className="modes__sep" aria-hidden />
       {data.map(btn)}
+      {layers.length > 0 && <span className="modes__sep" aria-hidden />}
+      {layers.map((l) => btn({ key: `layer:${l.id}`, label: l.name, kind: 'data', shader: 3 }))}
     </div>
   );
 }
 
-export function Legend({ mode, present }: { mode: MapMode; present?: Set<number> }) {
+export function Legend({ mode, present, layer }: { mode: MapMode; present?: Set<number>; layer?: DataLayer | null }) {
+  if (isLayerMode(mode)) return layer ? <LayerLegend layer={layer} /> : null;
   const ramp = rampFor(mode);
   const cats = categoriesFor(mode);
   if (!ramp && !cats) return null;
@@ -78,6 +82,37 @@ export function Legend({ mode, present }: { mode: MapMode; present?: Set<number>
           {c.name}
         </span>
       ))}
+    </div>
+  );
+}
+
+function LayerLegend({ layer }: { layer: DataLayer }) {
+  const def = layer.def;
+  const css = (c: [number, number, number]) => `rgb(${c.map(Math.round).join(',')})`;
+  if (def.type === 'number') {
+    const [lo, hi] = numberRange(layer);
+    return (
+      <div className="legend" aria-label={`${def.name} legend`}>
+        <p className="legend__title">{def.name}</p>
+        <div className="legend__bar" style={{ background: `linear-gradient(to right, ${css(def.colorLow)}, ${css(def.colorHigh)})` }} />
+        <div className="legend__ticks">
+          <span style={{ left: '0%' }}>{formatValue(def, lo)}</span>
+          <span style={{ left: '100%' }}>{formatValue(def, hi)}</span>
+        </div>
+      </div>
+    );
+  }
+  const items = def.type === 'flag' ? [{ id: 1, name: 'Yes', color: def.categories[0]?.color ?? ([196, 70, 50] as [number, number, number]) }] : def.categories;
+  return (
+    <div className="legend legend--cats" aria-label={`${def.name} legend`}>
+      <p className="legend__title">{def.name}</p>
+      {items.map((c) => (
+        <span key={c.id} className="legend__cat">
+          <i style={{ background: css(c.color) }} />
+          {c.name}
+        </span>
+      ))}
+      {items.length === 0 && <span className="legend__cat">No categories yet</span>}
     </div>
   );
 }

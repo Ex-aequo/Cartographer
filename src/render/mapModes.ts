@@ -1,15 +1,20 @@
 import { Biome, BIOME_NAMES, Terrain, TERRAIN_NAMES } from '../model/types';
 import { DEPTH_METRES, ELEVATION_METRES } from '../gen/biomes';
 
-export type MapMode = 'political' | 'physical' | 'elevation' | 'temperature' | 'rainfall' | 'biome' | 'terrain';
+export type BuiltinMode = 'political' | 'physical' | 'elevation' | 'temperature' | 'rainfall' | 'biome' | 'terrain';
+/** built-in modes, or `layer:<id>` for a custom data layer */
+export type MapMode = BuiltinMode | `layer:${string}`;
+
+export const isLayerMode = (m: MapMode): m is `layer:${string}` => m.startsWith('layer:');
+export const layerIdOf = (m: MapMode) => (isLayerMode(m) ? m.slice(6) : null);
 
 export interface ModeDef {
   key: MapMode;
   label: string;
   /** art modes render the painted map; data modes show the hex values */
   kind: 'art' | 'data';
-  /** shader data mode: 0 none, 1 continuous ramp, 2 categorical */
-  shader: 0 | 1 | 2;
+  /** shader data mode: 0 none, 1 continuous ramp, 2 categorical, 3 custom layer colours */
+  shader: 0 | 1 | 2 | 3;
   /** which hex value a data mode reads: 0 elevation, 1 temperature, 2 moisture, 3 biome, 4 terrain */
   source?: number;
 }
@@ -24,7 +29,7 @@ export const MODES: ModeDef[] = [
   { key: 'terrain', label: 'Terrain type', kind: 'data', shader: 2, source: 4 },
 ];
 
-export const modeDef = (m: MapMode) => MODES.find((d) => d.key === m)!;
+export const modeDef = (m: MapMode): ModeDef => (isLayerMode(m) ? { key: m, label: 'Layer', kind: 'data', shader: 3 } : (MODES.find((d) => d.key === m) ?? MODES[0]));
 
 type RGB = [number, number, number];
 
