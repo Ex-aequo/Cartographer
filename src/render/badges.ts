@@ -1,3 +1,4 @@
+import { projector } from './camera';
 import type { MapData } from '../model/types';
 import { HexFlag } from '../model/types';
 import { hexCenterX, hexCenterY } from '../model/hex';
@@ -16,8 +17,8 @@ export function drawLayerBadges(ctx: CanvasRenderingContext2D, cssW: number, css
   const z = view.zoom;
   if (z < BADGE_ZOOM) return;
   const def = layer.def;
-  const sx = (x: number) => (x - view.cx) * z + cssW / 2;
-  const sy = (y: number) => (y - view.cy) * z + cssH / 2;
+  const proj = projector(view, cssW, cssH, map.height);
+  const scr = (x: number, y: number) => proj.pt(x, y, proj.ground(x, y));
   const { cols, rows } = map.grid;
   const r = Math.min(z * 0.36, 15);
   ctx.save();
@@ -41,21 +42,41 @@ export function drawLayerBadges(ctx: CanvasRenderingContext2D, cssW: number, css
     ctx.fillText(text, x, y + 0.5);
   };
   if (def.scope === 'hex') {
-    const x0 = Math.max(0, Math.floor((view.cx - cssW / 2 / z) / 1.732) - 1);
-    const x1 = Math.min(cols - 1, Math.ceil((view.cx + cssW / 2 / z) / 1.732) + 1);
-    const y0 = Math.max(0, Math.floor((view.cy - cssH / 2 / z - 1) / 1.5) - 1);
-    const y1 = Math.min(rows - 1, Math.ceil((view.cy + cssH / 2 / z) / 1.5) + 1);
+    // the hexes on screen: a box around what the corners of the view see
+    let bx0 = view.cx - cssW / 2 / z, bx1 = view.cx + cssW / 2 / z, by0 = view.cy - cssH / 2 / z, by1 = view.cy + cssH / 2 / z;
+    if (!proj.flat) {
+      const cs = [proj.unproject(0, 0), proj.unproject(cssW, 0), proj.unproject(0, cssH), proj.unproject(cssW, cssH)];
+      if (cs.every(Boolean)) {
+        bx0 = Math.min(...cs.map((c) => c![0])) - 2;
+        bx1 = Math.max(...cs.map((c) => c![0])) + 2;
+        by0 = Math.min(...cs.map((c) => c![1])) - 2;
+        by1 = Math.max(...cs.map((c) => c![1])) + 2;
+      } else {
+        bx0 = 0;
+        by0 = 0;
+        bx1 = map.world.width;
+        by1 = map.world.height;
+      }
+    }
+    const x0 = Math.max(0, Math.floor(bx0 / 1.732) - 1);
+    const x1 = Math.min(cols - 1, Math.ceil(bx1 / 1.732) + 1);
+    const y0 = Math.max(0, Math.floor((by0 - 1) / 1.5) - 1);
+    const y1 = Math.min(rows - 1, Math.ceil(by1 / 1.5) + 1);
     for (let row = y0; row <= y1; row++)
       for (let col = x0; col <= x1; col++) {
         const h = row * cols + col;
         if (!(map.hex.flags[h] & HexFlag.Land)) continue;
-        draw(sx(hexCenterX(col, row)), sy(hexCenterY(row)), layer.values[h]);
+        const q = scr(hexCenterX(col, row), hexCenterY(row));
+        if (!q || q[2] < BADGE_ZOOM * 0.7 || q[0] < -30 || q[1] < -30 || q[0] > cssW + 30 || q[1] > cssH + 30) continue;
+        draw(q[0], q[1], layer.values[h]);
       }
   } else {
     for (const p of map.provinces) {
       if (p.retired || !p.hexes.length) continue;
-      const x = sx(p.center[0]);
-      const y = sy(p.center[1]) + 18;
+      const q = scr(p.center[0], p.center[1]);
+      if (!q) continue;
+      const x = q[0];
+      const y = q[1] + 18;
       if (x < -40 || y < -40 || x > cssW + 40 || y > cssH + 40) continue;
       draw(x, y, layer.values[p.id]);
     }

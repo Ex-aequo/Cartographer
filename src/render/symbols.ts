@@ -1,3 +1,4 @@
+import { projector } from './camera';
 import type { MapData } from '../model/types';
 import { assetById, heightOf, levelOf, visibleAt, type Placement, type SymbolAsset } from '../model/symbols';
 import type { View } from './MapRenderer';
@@ -118,12 +119,16 @@ export function drawSymbols(ctx: CanvasRenderingContext2D, cssW: number, cssH: n
 export function drawPlacement(ctx: CanvasRenderingContext2D, cssW: number, cssH: number, dpr: number, view: View, map: MapData, p: Placement, selected: boolean, alpha = 1): void {
   const a = assetById(map, p.asset);
   if (!a) return;
-  const z = view.zoom;
+  const proj = projector(view, cssW, cssH, map.height);
+  const at = proj.pt(p.x, p.y, proj.ground(p.x, p.y));
+  if (!at) return;
+  const z = at[2];
   const w = p.size * z;
   const h = heightOf(map, p) * z;
   if (w < 2) return;
-  const sx = (p.x - view.cx) * z + cssW / 2;
-  const sy = (p.y - view.cy) * z + cssH / 2;
+  const sx = at[0];
+  // in 3D a symbol stands on its spot, like a piece on a board
+  const sy = proj.flat ? at[1] : at[1] - h / 2;
   const r = Math.max(w, h);
   if (sx < -r || sy < -r || sx > cssW + r || sy > cssH + r) return;
   const pic = pictureFor(a, w * dpr, p.tint, p.ink);

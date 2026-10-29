@@ -1,3 +1,4 @@
+import { projector } from './camera';
 import { drawSymbols, pictureFor } from './symbols';
 import { assetById, settlementAsset } from '../model/symbols';
 import type { LabelEdit, MapData } from '../model/types';
@@ -71,7 +72,14 @@ export function drawLabels(
   // placed symbols sit under the lettering
   drawSymbols(ctx, cssW, cssH, dpr, view, map, selectedSymbol);
   const z = view.zoom;
-  const toScreen = (x: number, y: number): [number, number] => [(x - view.cx) * z + cssW / 2, (y - view.cy) * z + cssH / 2];
+  // names sit on the land: projected through the camera, at ground height
+  const proj = projector(view, cssW, cssH, map.height);
+  const toScreen = (x: number, y: number): [number, number] => {
+    const r = proj.pt(x, y, proj.ground(x, y));
+    return r ? [r[0], r[1]] : [-1e5, -1e5];
+  };
+  /** px per world unit at a point (the view zoom when flat) */
+  const scaleAt = (x: number, y: number) => (proj.flat ? z : (proj.pt(x, y, proj.ground(x, y))?.[2] ?? 0));
   const onScreen = (x: number, y: number, m: number) => x > -m && y > -m && x < cssW + m && y < cssH + m;
 
   // Placed boxes, for collision checks: [x0, y0, x1, y1]
@@ -85,7 +93,7 @@ export function drawLabels(
       const key = `realm:${l0.id}`;
       const e = edits[key];
       if (e?.hidden || map.realms[l0.id]?.retired) continue;
-      const box = drawCurved(ctx, adjustedCurve(l0, e, map.realms[l0.id]?.name ?? l0.text), toScreen, z, realmAlpha, onScreen, REALM_STYLE);
+      const box = drawCurved(ctx, adjustedCurve(l0, e, map.realms[l0.id]?.name ?? l0.text), toScreen, scaleAt(l0.p1[0], l0.p1[1]), realmAlpha, onScreen, REALM_STYLE);
       // while realm names are still legible, region names keep clear of them
       if (box && realmAlpha > 0.25) {
         boxes.push(box);
@@ -102,7 +110,7 @@ export function drawLabels(
       const e = edits[key];
       if (e?.hidden || map.regions[l0.id]?.retired) continue;
       // a label placed by hand stays where it was put, collisions or not
-      const box = drawCurved(ctx, adjustedCurve(l0, e, map.regions[l0.id]?.name ?? l0.text), toScreen, z, regionAlpha, onScreen, REGION_STYLE, e ? undefined : hits);
+      const box = drawCurved(ctx, adjustedCurve(l0, e, map.regions[l0.id]?.name ?? l0.text), toScreen, scaleAt(l0.p1[0], l0.p1[1]), regionAlpha, onScreen, REGION_STYLE, e ? undefined : hits);
       if (box) {
         boxes.push(box);
         if (regionAlpha > 0.25) drawn.push({ key, box });
@@ -121,10 +129,13 @@ export function drawLabels(
     for (const p of map.provinces) {
       if (p.retired || p.capitalHex < 0) continue;
       const row = Math.floor(p.capitalHex / map.grid.cols);
-      const [sx, sy] = toScreen(hexCenterX(p.capitalHex % map.grid.cols, row), hexCenterY(row));
+      const hx = hexCenterX(p.capitalHex % map.grid.cols, row);
+      const hy = hexCenterY(row);
+      const [sx, sy] = toScreen(hx, hy);
+      const zl = scaleAt(hx, hy);
       if (!onScreen(sx, sy, 30)) continue;
       const cap = realmCapitals.has(p.id);
-      const sc = Math.min(1.6, Math.max(0.8, z / 28)) * (cap ? 1.35 : 1);
+      const sc = Math.min(1.6, Math.max(0.8, zl / 28)) * (cap ? 1.35 : 1);
       const custom = settlementAsset(map, p.id, cap ? 'capital' : seats.has(p.id) ? 'seat' : 'town');
       const asset = custom ? assetById(map, custom) : undefined;
       let hs = 6 * sc;
@@ -156,10 +167,12 @@ export function drawLabels(
       const text = prov.name;
       const [lx, ly] = toScreen(l.x + (e?.dx ?? 0), l.y + (e?.dy ?? 0));
       if (!onScreen(lx, ly, 120)) continue;
-      const px = Math.min(22 * (e?.scale ?? 1), Math.max(10, l.size * z * 0.62 * (e?.scale ?? 1)));
+      const zl = scaleAt(l.x, l.y);
+      if (zl <= 0) continue;
+      const px = Math.min(22 * (e?.scale ?? 1), Math.max(10, l.size * zl * 0.62 * (e?.scale ?? 1)));
       ctx.font = `italic ${px}px ${NAME_FONT}`;
       const w = ctx.measureText(text).width;
-      const radius = Math.sqrt(prov.hexes.length * 0.83) * z;
+      const radius = Math.sqrt(prov.hexes.length * 0.83) * zl;
       if (!e && w > radius * 2.4) continue; // not enough room: leave it for the next zoom step
       // a hand-placed name goes exactly where it was put; otherwise try the
       // open middle of the province first, then beside its own settlement
@@ -236,9 +249,12 @@ function drawCurved(
   style: CurveStyle,
   blocked?: (box: number[]) => boolean,
 ): number[] | null {
-  const p0 = toScreen(l.p0[0], l.p0[1]);
+  let p0 = toScreen(l.p0[0], l.p0[1]);
   const p1 = toScreen(l.p1[0], l.p1[1]);
-  const p2 = toScreen(l.p2[0], l.p2[1]);
+  let p2 = toScreen(l.p2[0], l.p2[1]);
+  // on a turned map, read the name left to right
+  if (p2[0] < p0[0]) [p0, p2] = [p2, p0];
+  if (z <= 0) return null;
   let px = Math.min(style.maxPx, l.size * z);
   if (px < style.minPx) return null;
   if (!onScreen(p0[0], p0[1], 400) && !onScreen(p2[0], p2[1], 400) && !onScreen(p1[0], p1[1], 400)) return null;

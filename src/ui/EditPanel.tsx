@@ -72,7 +72,7 @@ export function EditPanel(p: Props) {
         </fieldset>
       ))}
 
-      {s.tool ? <p className="hint">{t(HINTS[s.tool])} {t('Right-drag or hold Space to move the map.')}</p> : <p className="hint">{t('Pick a tool to start. Click a province with no tool to rename it. Every change can be undone.')}</p>}
+      {s.tool ? <p className="hint">{t(HINTS[s.tool])} {t('Right-drag or hold Space to move the map.')} {t('In 3D, right-drag turns and tilts it; middle-drag or Space moves it.')}</p> : <p className="hint">{t('Pick a tool to start. Click a province with no tool to rename it. Every change can be undone.')}</p>}
 
       {s.tool && BRUSH_TOOLS.includes(s.tool) && (
         <label className="field">

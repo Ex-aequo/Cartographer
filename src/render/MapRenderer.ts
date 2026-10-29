@@ -8,13 +8,8 @@ export type { MapMode } from './mapModes';
 import mapFrag from './shaders/map.frag.glsl?raw';
 import { riverFrag, riverVert } from './shaders/river';
 
-export interface View {
-  /** world units */
-  cx: number;
-  cy: number;
-  /** CSS pixels per world unit */
-  zoom: number;
-}
+import { basisFor, is3d, type View } from './camera';
+export type { View } from './camera';
 
 
 export interface RenderState {
@@ -82,6 +77,16 @@ export class MapRenderer {
       uZoom: { value: 1 },
       uPixelRatio: { value: 1 },
       uPaperMix: { value: 1 },
+      u3D: { value: 0 },
+      uCamPos: { value: new THREE.Vector3() },
+      uCamR: { value: new THREE.Vector3(1, 0, 0) },
+      uCamUp: { value: new THREE.Vector3(0, -1, 0) },
+      uCamF: { value: new THREE.Vector3(0, 0, -1) },
+      uFocal: { value: 1 },
+      uReliefH: { value: 0 },
+      uMarchSteps: { value: 48 },
+      tHeight: { value: null },
+      uHeightSpan: { value: new THREE.Vector2(1, 1) },
     };
     this.mapMat = new THREE.RawShaderMaterial({
       glslVersion: THREE.GLSL3,
@@ -92,8 +97,6 @@ export class MapRenderer {
       uniforms: {
         ...common,
         uWorld: { value: new THREE.Vector2(1, 1) },
-        tHeight: { value: null },
-        uHeightSpan: { value: new THREE.Vector2(1, 1) },
         tClimate: { value: null },
         uClimateSpan: { value: new THREE.Vector2(1, 1) },
         tHex: { value: null },
@@ -262,6 +265,18 @@ export class MapRenderer {
     // at hex zoom, borders tighten onto hex edges so they agree with the grid
     u.uSigma2.value = BORDER_SIGMA2 + (0.04 - BORDER_SIGMA2) * hz;
     u.uWarpAmt.value = 1 - hz;
+    // the 3D camera (same maths as render/camera.ts, in device px)
+    const v = s.view;
+    u.u3D.value = is3d(v) ? 1 : 0;
+    if (is3d(v)) {
+      const b = basisFor({ ...v, zoom: v.zoom * pr }, bh);
+      u.uCamPos.value.set(b.pos[0], b.pos[1], b.pos[2]);
+      u.uCamR.value.set(b.right[0], b.right[1], b.right[2]);
+      u.uCamUp.value.set(b.up[0], b.up[1], b.up[2]);
+      u.uCamF.value.set(b.fwd[0], b.fwd[1], b.fwd[2]);
+      u.uFocal.value = b.focal;
+      u.uReliefH.value = v.relief ?? 0;
+    }
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -314,6 +329,7 @@ export class MapRenderer {
     this.renderer.setSize(size.x, size.y, false);
     // fewer gully octaves on the fastest setting
     this.mapMat.uniforms.uRelief.value = q === 'fast' ? 0.85 : 1;
+    this.mapMat.uniforms.uMarchSteps.value = q === 'high' ? 64 : q === 'balanced' ? 44 : 28;
   }
 
   /** Debug and test hook: override a shader uniform. */

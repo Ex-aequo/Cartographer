@@ -1,6 +1,6 @@
 [package]
 name = "cartographer"
-version = "0.5.0"
+version = "0.6.0"
 description = "Cartographer: fantasy and game maps"
 authors = ["Ex-aequo"]
 edition = "2021"

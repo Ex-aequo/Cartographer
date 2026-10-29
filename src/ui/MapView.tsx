@@ -4,7 +4,8 @@ import { drawPlacement, setSymbolReadyCallback } from '../render/symbols';
 import type { SymbolBridge } from '../state/useSymbols';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
 import type { LoadedMap } from '../state/useMapWorker';
-import { MapRenderer, ZOOM, hexFactor, type MapMode, type Quality, type View } from '../render/MapRenderer';
+import { MapRenderer, ZOOM, hexFactor, paperMixFor, type MapMode, type Quality, type View } from '../render/MapRenderer';
+import { DEFAULT_CAMERA, MAX_TILT, projector, reliefAt, wrapAngle, type Camera3D } from '../render/camera';
 import { drawLabels, labelAt, type DrawnLabel } from '../render/LabelLayer';
 import { hexAt } from '../model/hex';
 import { ownerAt } from '../render/assets';
@@ -26,6 +27,9 @@ export interface MapViewHandle {
   getView(): View;
   snapshot(): Promise<Blob | null>;
   setUniform(name: string, value: number): void;
+  /** change the 3D camera; `animate` eases into it */
+  setCamera(patch: Partial<Camera3D>, animate?: boolean): void;
+  getCamera(): Camera3D;
 }
 
 /** What the map view needs from the editor. Read through refs, so it never re-renders the view. */
@@ -56,9 +60,10 @@ interface Props {
   selected: Pick | null;
   onSelect(p: Pick | null): void;
   onZoom(zoom: number): void;
+  onCamera(c: Camera3D): void;
 }
 
-export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ editor, toolActive, revision, quality, loaded, mode, layerColors, badgeLayer, symbols, selected, onSelect, onZoom }, ref) {
+export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ editor, toolActive, revision, quality, loaded, mode, layerColors, badgeLayer, symbols, selected, onSelect, onZoom, onCamera }, ref) {
   const wrap = useRef<HTMLDivElement>(null);
   const glCanvas = useRef<HTMLCanvasElement>(null);
   const labelCanvas = useRef<HTMLCanvasElement>(null);
@@ -68,8 +73,13 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ edito
   const size = useRef({ w: 1, h: 1 });
   const frame = useRef(0);
   const anim = useRef<{ from: View; to: View; t0: number; dur: number } | null>(null);
-  const props = useRef({ loaded, mode, selected, onZoom, badgeLayer });
-  props.current = { loaded, mode, selected, onZoom, badgeLayer };
+  const props = useRef({ loaded, mode, selected, onZoom, onCamera, badgeLayer });
+  props.current = { loaded, mode, selected, onZoom, onCamera, badgeLayer };
+  /** the 3D settings, and how far the view has eased into 3D (0 = flat, 1 = full) */
+  const cam = useRef<Camera3D>({ ...DEFAULT_CAMERA });
+  const blend = useRef(0);
+  const camAnim = useRef<{ fromBlend: number; toBlend: number; fromRot: number; toRot: number; fromTilt: number; toTilt: number; t0: number; dur: number } | null>(null);
+  const lastCamReported = useRef('');
   const lastZoomReported = useRef(-1);
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
@@ -82,10 +92,29 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ edito
   /** labels drawn in the last frame, for the label tool */
   const drawnLabels = useRef<DrawnLabel[]>([]);
 
+  /** pan and zoom plus the 3D camera: what every layer draws with */
+  const fullView = (): View => {
+    const v = view.current;
+    const k = blend.current;
+    if (k <= 0) return { cx: v.cx, cy: v.cy, zoom: v.zoom };
+    const c = cam.current;
+    return { cx: v.cx, cy: v.cy, zoom: v.zoom, on3d: true, rot: c.rot, tilt: c.tilt * k, relief: reliefAt(c.height * k, paperMixFor(v.zoom)) };
+  };
+
   const draw = useCallback(() => {
     const r = renderer.current;
     const l = props.current.loaded;
     if (!r || !l) return;
+    if (camAnim.current) {
+      const a = camAnim.current;
+      const t = Math.min(1, (performance.now() - a.t0) / a.dur);
+      const e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      blend.current = a.fromBlend + (a.toBlend - a.fromBlend) * e;
+      cam.current.rot = a.fromRot + (a.toRot - a.fromRot) * e;
+      cam.current.tilt = a.fromTilt + (a.toTilt - a.fromTilt) * e;
+      if (t >= 1) camAnim.current = null;
+      else schedule();
+    }
     if (anim.current) {
       const { from, to, t0, dur } = anim.current;
       const t = Math.min(1, (performance.now() - t0) / dur);
@@ -96,22 +125,29 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ edito
       if (t >= 1) anim.current = null;
       else schedule();
     }
-    r.render({ view: view.current, mode: props.current.mode, selectedProvince: props.current.selected?.province ?? -1, hoveredProvince: hover.current });
+    const fv = fullView();
+    r.render({ view: fv, mode: props.current.mode, selectedProvince: props.current.selected?.province ?? -1, hoveredProvince: hover.current });
     const ctx = labelCanvas.current!.getContext('2d')!;
     const sym = symbolsRef.current;
-    drawnLabels.current = drawLabels(ctx, size.current.w, size.current.h, labelDpr(), view.current, l.map, l.assets, editorRef.current.settings()?.tool === 'label' ? editorRef.current.selectedLabel() : null, sym.active() ? sym.selected() : null);
+    drawnLabels.current = drawLabels(ctx, size.current.w, size.current.h, labelDpr(), fv, l.map, l.assets, editorRef.current.settings()?.tool === 'label' ? editorRef.current.selectedLabel() : null, sym.active() ? sym.selected() : null);
     const armed = sym.active() ? sym.armed() : null;
     if (armed && pointerWorld.current) {
       // a faint preview of the symbol about to be placed
       const [px, py] = pointerWorld.current;
-      drawPlacement(ctx, size.current.w, size.current.h, labelDpr(), view.current, l.map, { id: -1, asset: armed.asset, x: px, y: py, hex: -1, ...armed.opts }, false, 0.55);
+      drawPlacement(ctx, size.current.w, size.current.h, labelDpr(), fv, l.map, { id: -1, asset: armed.asset, x: px, y: py, hex: -1, ...armed.opts }, false, 0.55);
     }
-    if (props.current.badgeLayer) drawLayerBadges(ctx, size.current.w, size.current.h, labelDpr(), view.current, l.map, props.current.badgeLayer);
+    if (props.current.badgeLayer) drawLayerBadges(ctx, size.current.w, size.current.h, labelDpr(), fv, l.map, props.current.badgeLayer);
     const tool = editorRef.current.settings();
-    if (tool) drawEditOverlay(ctx, size.current.w, size.current.h, view.current, l.map, tool, editorRef.current.session, pointerWorld.current);
+    if (tool) drawEditOverlay(ctx, size.current.w, size.current.h, fv, l.map, tool, editorRef.current.session, pointerWorld.current);
     if (Math.abs(view.current.zoom - lastZoomReported.current) > 1e-3) {
       lastZoomReported.current = view.current.zoom;
       props.current.onZoom(view.current.zoom);
+    }
+    const c = cam.current;
+    const key = `${c.on}|${c.rot.toFixed(3)}|${c.tilt.toFixed(3)}|${c.height.toFixed(3)}`;
+    if (key !== lastCamReported.current) {
+      lastCamReported.current = key;
+      props.current.onCamera({ ...c });
     }
   }, []);
 
@@ -131,6 +167,10 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ edito
     const zoom = Math.min(ZOOM.max, Math.max(fitZ * 0.7, v.zoom));
     const mx = size.current.w / 2 / zoom;
     const my = size.current.h / 2 / zoom;
+    if (blend.current > 0) {
+      // in 3D the orbit centre may sit anywhere on the world
+      return { cx: Math.min(Math.max(v.cx, 0), width), cy: Math.min(Math.max(v.cy, 0), height), zoom };
+    }
     const cx = Math.min(Math.max(v.cx, Math.min(mx * 0.5, width / 2)), Math.max(width - mx * 0.5, width / 2));
     const cy = Math.min(Math.max(v.cy, Math.min(my * 0.5, height / 2)), Math.max(height - my * 0.5, height / 2));
     return { cx, cy, zoom };
@@ -163,7 +203,11 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ edito
       if (!l) return;
       flyTo(fitZoom(), l.map.world.width / 2, l.map.world.height / 2);
     },
-    getView: () => ({ ...view.current }),
+    getView: () => fullView(),
+    getCamera: () => ({ ...cam.current }),
+    setCamera(patch: Partial<Camera3D>, animate = true) {
+      setCam(patch, animate);
+    },
     setUniform(name: string, value: number) {
       renderer.current?.setUniform(name, value);
       schedule();
@@ -184,6 +228,28 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ edito
       return new Promise((res) => out.toBlob((b) => res(b), 'image/png'));
     },
   }));
+
+  /** applies new 3D settings; turning 3D on or off, or snapping north, eases */
+  const setCam = useCallback(
+    (patch: Partial<Camera3D>, animate = true) => {
+      const c = cam.current;
+      const next: Camera3D = { ...c, ...patch, tilt: Math.min(MAX_TILT, Math.max(0, patch.tilt ?? c.tilt)), height: Math.min(2, Math.max(0, patch.height ?? c.height)) };
+      const toBlend = next.on ? 1 : 0;
+      // turning off also turns the map back to north, so flat and 3D meet without a jump
+      const toRot = next.on ? next.rot : 0;
+      if (animate && (toBlend !== blend.current || Math.abs(wrapAngle(toRot - c.rot)) > 1e-3 || Math.abs(next.tilt - c.tilt) > 1e-3)) {
+        camAnim.current = { fromBlend: blend.current, toBlend, fromRot: c.rot, toRot: c.rot + wrapAngle(toRot - c.rot), fromTilt: c.tilt, toTilt: next.tilt, t0: performance.now(), dur: 600 };
+        cam.current = { ...next, rot: c.rot, tilt: c.tilt };
+      } else {
+        camAnim.current = null;
+        cam.current = { ...next, rot: toRot };
+        blend.current = toBlend;
+      }
+      view.current = clampView(view.current);
+      schedule();
+    },
+    [schedule],
+  );
 
   useEffect(() => setSymbolReadyCallback(() => schedule()), [schedule]);
 
@@ -242,9 +308,10 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ edito
     const pointers = new Map<number, { x: number; y: number }>();
     let downAt: { x: number; y: number } | null = null;
     let moved = 0;
-    let pinch: { d: number; zoom: number } | null = null;
+    let pinch: { d: number; zoom: number; a: number } | null = null;
     let editing = false;
     let panning = false;
+    let orbiting = false;
     let space = false;
     let holdTimer = 0;
     const tool = () => editorRef.current.settings();
@@ -262,24 +329,65 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ edito
       return !!t && HEIGHT_TOOLS.includes(t);
     };
 
-    const worldAt = (x: number, y: number) => {
+    const proj = () => projector(fullView(), size.current.w, size.current.h, props.current.loaded?.map.height ?? null);
+    /** the land under a screen point (in 3D: where the view ray meets the hills); null past the horizon */
+    const groundAt = (x: number, y: number) => {
       const r = el.getBoundingClientRect();
-      const v = view.current;
-      return { wx: v.cx + (x - r.left - size.current.w / 2) / v.zoom, wy: v.cy + (y - r.top - size.current.h / 2) / v.zoom };
+      const p = proj().unproject(x - r.left, y - r.top);
+      return p ? { wx: p[0], wy: p[1] } : null;
     };
+    /** the flat sea-level plane under a screen point: steady for pan and zoom over hills */
+    const planeAt = (x: number, y: number) => {
+      const r = el.getBoundingClientRect();
+      const p = proj().plane(x - r.left, y - r.top);
+      return p ? { wx: p[0], wy: p[1] } : null;
+    };
+    const worldAt = (x: number, y: number) => groundAt(x, y) ?? { wx: NaN, wy: NaN };
     const zoomAround = (factor: number, x: number, y: number) => {
-      const { wx, wy } = worldAt(x, y);
       const v = view.current;
       const nz = clampView({ ...v, zoom: v.zoom * factor }).zoom;
-      const f = nz / v.zoom;
-      view.current = clampView({ cx: wx - (wx - v.cx) / f, cy: wy - (wy - v.cy) / f, zoom: nz });
+      const before = planeAt(x, y);
+      view.current = { ...v, zoom: nz };
+      const after = planeAt(x, y);
+      // keep the spot under the cursor where it is
+      if (before && after) view.current = { ...view.current, cx: view.current.cx + before.wx - after.wx, cy: view.current.cy + before.wy - after.wy };
+      view.current = clampView(view.current);
       anim.current = null;
+      schedule();
+    };
+    const panBy = (x0: number, y0: number, x1: number, y1: number) => {
+      const v = view.current;
+      const a = planeAt(x0, y0);
+      const b = planeAt(x1, y1);
+      let dx = (x0 - x1) / v.zoom;
+      let dy = (y0 - y1) / v.zoom;
+      if (a && b) {
+        dx = a.wx - b.wx;
+        dy = a.wy - b.wy;
+        // near the horizon a pixel covers a lot of ground; cap the jump
+        const cap = (size.current.w * 0.5) / v.zoom;
+        const len = Math.hypot(dx, dy);
+        if (len > cap) {
+          dx *= cap / len;
+          dy *= cap / len;
+        }
+      }
+      view.current = clampView({ ...v, cx: v.cx + dx, cy: v.cy + dy });
+    };
+    const in3d = () => cam.current.on;
+    const orbit = (dx: number, dy: number) => {
+      camAnim.current = null;
+      blend.current = 1;
+      const c = cam.current;
+      cam.current = { ...c, rot: wrapAngle(c.rot + dx * 0.006), tilt: Math.min(MAX_TILT, Math.max(0, c.tilt - dy * 0.005)) };
       schedule();
     };
     const pickAt = (x: number, y: number): Pick | null => {
       const l = props.current.loaded;
       if (!l) return null;
-      const { wx, wy } = worldAt(x, y);
+      const g = groundAt(x, y);
+      if (!g) return null;
+      const { wx, wy } = g;
       const hex = hexAt(l.map.grid, wx, wy);
       if (hex < 0) return null;
       // borders follow hex edges at hex zoom; elsewhere they are the drawn, smoothed lines
@@ -300,6 +408,16 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ edito
         moved = 0;
         const l = props.current.loaded;
         const t = tool();
+        // in 3D: right-drag, or Ctrl/⌘ + drag, turns and tilts the view
+        if (in3d() && (e.button === 2 || (e.button === 0 && (e.ctrlKey || e.metaKey)))) {
+          orbiting = true;
+          return;
+        }
+        // middle-drag always pans
+        if (e.button === 1) {
+          panning = true;
+          return;
+        }
         // with a tool: left button draws; right or middle button, or Space held, pans
         let labelKey: string | null = null;
         if (t?.tool === 'label' && e.button === 0 && !space) {
@@ -308,14 +426,14 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ edito
           editorRef.current.selectLabel(labelKey);
           schedule();
         }
-        if (!t && l && e.button === 0 && !space && symbolMode()) {
+        if (!t && l && e.button === 0 && !space && symbolMode() && groundAt(e.clientX, e.clientY)) {
           const { wx, wy } = worldAt(e.clientX, e.clientY);
           symbolDrag = symbolsRef.current.down(wx, wy, view.current.zoom);
           panning = !symbolDrag;
           if (symbolDrag) schedule();
           return;
         }
-        if (t && l && e.button === 0 && !space && editorRef.current.ready() && (t.tool !== 'label' || labelKey)) {
+        if (t && l && e.button === 0 && !space && editorRef.current.ready() && (t.tool !== 'label' || labelKey) && groundAt(e.clientX, e.clientY)) {
           const { wx, wy } = worldAt(e.clientX, e.clientY);
           editorRef.current.session.begin(l.map, t, wx, wy, { labelKey: labelKey ?? undefined });
           editing = !!editorRef.current.session.stroke;
@@ -341,7 +459,7 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ edito
         stopStroke();
         panning = true;
         const [a, b] = [...pointers.values()];
-        pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), zoom: view.current.zoom };
+        pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), zoom: view.current.zoom, a: Math.atan2(b.y - a.y, b.x - a.x) };
       }
     };
     const onMove = (e: PointerEvent) => {
@@ -349,22 +467,27 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ edito
       if (symbolDrag && prev) {
         pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
         moved += Math.abs(e.clientX - prev.x) + Math.abs(e.clientY - prev.y);
-        if (moved >= 3) {
-          const { wx, wy } = worldAt(e.clientX, e.clientY);
-          symbolsRef.current.move(wx, wy, e.shiftKey);
-        }
+        const g = moved >= 3 ? groundAt(e.clientX, e.clientY) : null;
+        if (g) symbolsRef.current.move(g.wx, g.wy, e.shiftKey);
         schedule();
         return;
       }
+      if (orbiting && prev) {
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        moved += Math.abs(e.clientX - prev.x) + Math.abs(e.clientY - prev.y);
+        orbit(e.clientX - prev.x, e.clientY - prev.y);
+        el.style.cursor = 'move';
+        return;
+      }
       if (tool() || symbolMode()) {
-        const { wx, wy } = worldAt(e.clientX, e.clientY);
-        pointerWorld.current = [wx, wy];
+        const g = groundAt(e.clientX, e.clientY);
+        pointerWorld.current = g ? [g.wx, g.wy] : null;
         if (!prev) schedule();
       }
       if (editing && prev) {
         pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-        const { wx, wy } = worldAt(e.clientX, e.clientY);
-        if (editorRef.current.session.move(wx, wy)) renderer.current?.heightChanged();
+        const g = groundAt(e.clientX, e.clientY);
+        if (g && editorRef.current.session.move(g.wx, g.wy)) renderer.current?.heightChanged();
         schedule();
         return;
       }
@@ -383,6 +506,12 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ edito
         const [a, b] = [...pointers.values()];
         const d = Math.hypot(a.x - b.x, a.y - b.y);
         zoomAround((pinch.zoom * (d / pinch.d)) / view.current.zoom, (a.x + b.x) / 2, (a.y + b.y) / 2);
+        if (in3d()) {
+          // two-finger twist turns the map
+          const ang = Math.atan2(b.y - a.y, b.x - a.x);
+          cam.current = { ...cam.current, rot: wrapAngle(cam.current.rot - wrapAngle(ang - pinch.a)) };
+          pinch.a = ang;
+        }
         moved += 10;
         return;
       }
@@ -390,8 +519,7 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ edito
       const dx = e.clientX - prev.x;
       const dy = e.clientY - prev.y;
       moved += Math.abs(dx) + Math.abs(dy);
-      const v = view.current;
-      view.current = clampView({ ...v, cx: v.cx - dx / v.zoom, cy: v.cy - dy / v.zoom });
+      panBy(prev.x, prev.y, e.clientX, e.clientY);
       anim.current = null;
       el.style.cursor = 'grabbing';
       schedule();
@@ -400,6 +528,13 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ edito
       pointers.delete(e.pointerId);
       if (pointers.size < 2) pinch = null;
       el.style.cursor = '';
+      if (orbiting) {
+        if (pointers.size === 0) {
+          orbiting = false;
+          downAt = null;
+        }
+        return;
+      }
       if (editing) {
         stopStroke();
         downAt = null;
@@ -413,8 +548,8 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ edito
         return;
       }
       if (pointers.size === 0 && downAt && moved < 5 && symbolMode()) {
-        const { wx, wy } = worldAt(e.clientX, e.clientY);
-        symbolsRef.current.click(wx, wy, view.current.zoom, e.shiftKey);
+        const g = groundAt(e.clientX, e.clientY);
+        if (g) symbolsRef.current.click(g.wx, g.wy, view.current.zoom, e.shiftKey);
         schedule();
       } else if (pointers.size === 0 && downAt && moved < 5 && !tool()) onSelectRef.current(pickAt(e.clientX, e.clientY));
       if (pointers.size === 0) {
@@ -443,21 +578,55 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ edito
         if (tool()) e.preventDefault();
         return;
       }
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       const v = view.current;
       const step = 120 / v.zoom;
       const r = el.getBoundingClientRect();
       const cx = r.left + r.width / 2;
       const cy = r.top + r.height / 2;
+      // arrows move along the screen, whichever way the map is turned
+      const rot = blend.current > 0 ? cam.current.rot : 0;
+      const move = (sx: number, sy: number) => {
+        view.current = clampView({ ...v, cx: v.cx + (sx * Math.cos(rot) - sy * Math.sin(rot)) * step, cy: v.cy + (sx * Math.sin(rot) + sy * Math.cos(rot)) * step });
+      };
+      const k = e.key.toLowerCase();
       if (e.key === '+' || e.key === '=') zoomAround(1.35, cx, cy);
       else if (e.key === '-' || e.key === '_') zoomAround(1 / 1.35, cx, cy);
-      else if (e.key === 'ArrowLeft') view.current = clampView({ ...v, cx: v.cx - step });
-      else if (e.key === 'ArrowRight') view.current = clampView({ ...v, cx: v.cx + step });
-      else if (e.key === 'ArrowUp') view.current = clampView({ ...v, cy: v.cy - step });
-      else if (e.key === 'ArrowDown') view.current = clampView({ ...v, cy: v.cy + step });
+      else if (e.key === 'ArrowLeft') move(-1, 0);
+      else if (e.key === 'ArrowRight') move(1, 0);
+      else if (e.key === 'ArrowUp') move(0, -1);
+      else if (e.key === 'ArrowDown') move(0, 1);
+      else if ((k === 'q' || k === 'e') && in3d()) orbit(k === 'q' ? -26 : 26, 0);
       else if (e.key === 'Escape') onSelectRef.current(null);
       else return;
       schedule();
     };
+    // Safari trackpad: pinch zooms, twist turns the map
+    let gesture: { scale: number; rot: number } | null = null;
+    const onGestureStart = (e: Event) => {
+      e.preventDefault();
+      gesture = { scale: 1, rot: 0 };
+    };
+    const onGestureChange = (e: Event) => {
+      e.preventDefault();
+      const g = e as Event & { scale: number; rotation: number; clientX: number; clientY: number };
+      if (!gesture) return;
+      zoomAround(g.scale / gesture.scale, g.clientX, g.clientY);
+      if (in3d()) {
+        const r = (g.rotation * Math.PI) / 180;
+        cam.current = { ...cam.current, rot: wrapAngle(cam.current.rot - (r - gesture.rot)) };
+        gesture.rot = r;
+      }
+      gesture.scale = g.scale;
+      schedule();
+    };
+    const onGestureEnd = (e: Event) => {
+      e.preventDefault();
+      gesture = null;
+    };
+    el.addEventListener('gesturestart', onGestureStart);
+    el.addEventListener('gesturechange', onGestureChange);
+    el.addEventListener('gestureend', onGestureEnd);
     el.addEventListener('wheel', onWheel, { passive: false });
     el.addEventListener('pointerdown', onDown);
     el.addEventListener('pointermove', onMove);
@@ -472,6 +641,9 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ edito
       window.removeEventListener('keyup', onKeyUp);
       el.removeEventListener('contextmenu', onContext);
       el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('gesturestart', onGestureStart);
+      el.removeEventListener('gesturechange', onGestureChange);
+      el.removeEventListener('gestureend', onGestureEnd);
       el.removeEventListener('pointerdown', onDown);
       el.removeEventListener('pointermove', onMove);
       el.removeEventListener('pointerup', onUp);
