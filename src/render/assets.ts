@@ -4,11 +4,10 @@ import { buildNeighbors, hexAt, hexCenterX, hexCenterY, sampleField } from '../m
 import { Rng } from '../util/rng';
 import { Simplex2 } from '../util/noise';
 import { distanceTransform } from './edt';
+import { LAPSE } from '../gen/biomes';
 
-/** Texels per world unit for the ID and border-distance textures. */
-export const ID_RES = 6;
-/** Border-distance channels store texels × this scale (max 255 / scale). */
-export const COAST_SCALE = 4;
+/** Coast-distance texture: one texel per heightfield texel. */
+export const COAST_SCALE = 8;
 /** Gaussian kernel (σ², world units²) of the province vote. Shared with the shader. */
 export const BORDER_SIGMA2 = 0.62;
 
@@ -36,12 +35,12 @@ export interface CurveLabel extends LabelCurve {
 }
 
 export interface RenderAssets {
-  idW: number;
-  idH: number;
-  /** Province+1 per texel (same vote as the shader), for picking. */
-  provinceIds: Uint16Array;
-  /** RGBA8; B = distance to the coast (texels × COAST_SCALE). Other channels reserved. */
-  distData: Uint8Array;
+  /** Distance to the coast, R8 (texels × COAST_SCALE), same grid as the heightfield. */
+  coast: Uint8Array;
+  coastW: number;
+  coastH: number;
+  /** Texels per world unit of the coast texture. */
+  coastRes: number;
   /** Per hex, RGBA8: province+1 (16 bit LE in R,G), realm+1 (B,A). */
   hexOwners: Uint8Array;
   /** Per hex, RGBA8: region+1 (16 bit LE in R,G), biome code (B), terrain code (A). */
@@ -52,6 +51,9 @@ export interface RenderAssets {
   farm: Float32Array;
   farmW: number;
   farmH: number;
+  /** Painted terrain as climate targets, RGBA32F, 1 texel per world unit:
+   *  R sea-level temperature, G moisture, B weight. */
+  paint: Float32Array;
   /** Border warp offsets (RG float), grid point i at world i / 2. */
   warp: Float32Array;
   warpW: number;
@@ -64,134 +66,133 @@ export interface RenderAssets {
   realmPalette: Uint8Array;
 }
 
-export function buildRenderAssets(map: MapData, onProgress: (s: string, f: number) => void = () => {}): RenderAssets {
-  const { world, grid, hex, provinces, regions } = map;
-  const idW = Math.ceil(world.width * ID_RES);
-  const idH = Math.ceil(world.height * ID_RES);
-  const n = idW * idH;
-
-  onProgress('Inking borders', 0.8);
-  // Organic borders: hex lookups use a gently warped position, so province
-  // edges meander instead of following hex sides. Coasts come from the
-  // continuous heightfield and are smooth already.
+/** Border warp grid: 2 points per world unit. Deterministic from the seed. */
+export function buildWarp(map: MapData): { warp: Float32Array; warpW: number; warpH: number } {
   const warpNoise = new Simplex2(new Rng(map.meta.params.seed).fork('border-warp'));
-  const ww = Math.ceil(world.width * 2) + 2;
-  const wh = Math.ceil(world.height * 2) + 2;
-  const warpX = new Float32Array(ww * wh);
-  const warpY = new Float32Array(ww * wh);
+  const ww = Math.ceil(map.world.width * 2) + 2;
+  const wh = Math.ceil(map.world.height * 2) + 2;
+  const warp = new Float32Array(ww * wh * 2);
   for (let j = 0; j < wh; j++)
     for (let i = 0; i < ww; i++) {
       const x = i / 2;
       const y = j / 2;
-      warpX[j * ww + i] = 0.36 * warpNoise.fbm(x * 0.45, y * 0.45, 3) + 0.1 * warpNoise.noise(x * 2.1 + 9, y * 2.1);
-      warpY[j * ww + i] = 0.36 * warpNoise.fbm(x * 0.45 + 31, y * 0.45 - 17, 3) + 0.1 * warpNoise.noise(x * 2.1, y * 2.1 + 13);
+      const k = (j * ww + i) * 2;
+      warp[k] = 0.36 * warpNoise.fbm(x * 0.45, y * 0.45, 3) + 0.1 * warpNoise.noise(x * 2.1 + 9, y * 2.1);
+      warp[k + 1] = 0.36 * warpNoise.fbm(x * 0.45 + 31, y * 0.45 - 17, 3) + 0.1 * warpNoise.noise(x * 2.1, y * 2.1 + 13);
     }
+  return { warp, warpW: ww, warpH: wh };
+}
 
-  const provOf = new Uint16Array(n);
-  const realmOf = new Uint16Array(n);
-  const regionOf = new Uint16Array(n);
-  const land = new Uint8Array(n);
-  const provRealm = provinces.map((p) => regions[p.region].realm);
-  const nbr = buildNeighbors(grid);
-  const hcx = new Float32Array(grid.cols * grid.rows);
-  const hcy = new Float32Array(grid.cols * grid.rows);
-  for (let k = 0; k < hcx.length; k++) {
-    const row = Math.floor(k / grid.cols);
-    hcx[k] = hexCenterX(k % grid.cols, row);
-    hcy[k] = hexCenterY(row);
-  }
-  const candP = new Int32Array(7);
-  const candW = new Float64Array(7);
-  for (let j = 0; j < idH; j++) {
-    const y = (j + 0.5) / ID_RES;
-    for (let i = 0; i < idW; i++) {
-      const x = (i + 0.5) / ID_RES;
-      const k = j * idW + i;
-      if (sampleField(map.height, x, y) < 0) continue;
-      land[k] = 1;
-      const fx = x * 2;
-      const fy = y * 2;
-      const ii = Math.min(ww - 2, Math.floor(fx));
-      const jj = Math.min(wh - 2, Math.floor(fy));
-      const tx = fx - ii;
-      const ty = fy - jj;
-      const kk = jj * ww + ii;
-      const dx = (warpX[kk] * (1 - tx) + warpX[kk + 1] * tx) * (1 - ty) + (warpX[kk + ww] * (1 - tx) + warpX[kk + ww + 1] * tx) * ty;
-      const dy = (warpY[kk] * (1 - tx) + warpY[kk + 1] * tx) * (1 - ty) + (warpY[kk + ww] * (1 - tx) + warpY[kk + ww + 1] * tx) * ty;
-      const px = x + dx;
-      const py = y + dy;
-      const h = hexAt(grid, px, py);
-      // Gaussian vote among the hex and its neighbours: rounds the hex
-      // zig-zag into smooth curves while every hex centre keeps its owner.
-      let prov = -1;
-      if (h >= 0) {
-        let bestW = 0;
-        let nCand = 0;
-        for (let d = -1; d < 6; d++) {
-          const c = d < 0 ? h : nbr[h * 6 + d];
-          if (c < 0) continue;
-          const pc = hex.province[c];
-          if (pc < 0) continue;
-          const wgt = Math.exp(-((hcx[c] - px) ** 2 + (hcy[c] - py) ** 2) / BORDER_SIGMA2);
-          let found = false;
-          for (let t = 0; t < nCand; t++)
-            if (candP[t] === pc) {
-              candW[t] += wgt;
-              found = true;
-              break;
-            }
-          if (!found) {
-            candP[nCand] = pc;
-            candW[nCand++] = wgt;
-          }
-        }
-        for (let t = 0; t < nCand; t++)
-          if (candW[t] > bestW) {
-            bestW = candW[t];
-            prov = candP[t];
-          }
+export type OwnerLevel = 'province' | 'region' | 'realm';
+
+/**
+ * Who owns world point (x, y): the same warped Gaussian vote the shader uses
+ * to draw borders, so a click always lands on the province that is drawn
+ * there. Returns the province, region or realm id, or −1 for water.
+ */
+export function ownerAt(map: MapData, a: Pick<RenderAssets, 'warp' | 'warpW' | 'warpH'>, x: number, y: number, level: OwnerLevel = 'province'): number {
+  const { grid, hex, provinces, regions } = map;
+  if (sampleField(map.height, x, y) < 0) return -1;
+  const ww = a.warpW;
+  const wh = a.warpH;
+  const fx = Math.max(0, Math.min(ww - 1.001, x * 2));
+  const fy = Math.max(0, Math.min(wh - 1.001, y * 2));
+  const ii = Math.floor(fx);
+  const jj = Math.floor(fy);
+  const tx = fx - ii;
+  const ty = fy - jj;
+  const W = a.warp;
+  const at = (i: number, j: number, c: number) => W[(j * ww + i) * 2 + c];
+  const dx = (at(ii, jj, 0) * (1 - tx) + at(ii + 1, jj, 0) * tx) * (1 - ty) + (at(ii, jj + 1, 0) * (1 - tx) + at(ii + 1, jj + 1, 0) * tx) * ty;
+  const dy = (at(ii, jj, 1) * (1 - tx) + at(ii + 1, jj, 1) * tx) * (1 - ty) + (at(ii, jj + 1, 1) * (1 - tx) + at(ii + 1, jj + 1, 1) * tx) * ty;
+  const px = x + dx;
+  const py = y + dy;
+  const idOf = (prov: number) => (level === 'province' ? prov : level === 'region' ? provinces[prov].region : regions[provinces[prov].region].realm);
+  const h = hexAt(grid, px, py);
+  if (h >= 0) {
+    const nbr = neighborsOf(map);
+    const ids: number[] = [];
+    const ws: number[] = [];
+    for (let d = -1; d < 6; d++) {
+      const c = d < 0 ? h : nbr[h * 6 + d];
+      if (c < 0) continue;
+      const pc = hex.province[c];
+      if (pc < 0) continue;
+      const row = Math.floor(c / grid.cols);
+      const wgt = Math.exp(-((hexCenterX(c % grid.cols, row) - px) ** 2 + (hexCenterY(row) - py) ** 2) / BORDER_SIGMA2);
+      const id = idOf(pc);
+      const t = ids.indexOf(id);
+      if (t >= 0) ws[t] += wgt;
+      else {
+        ids.push(id);
+        ws.push(wgt);
       }
-      if (prov < 0) {
-        // land texel in a water hex (or warped off-grid): nearest land hex around it
-        const h0 = hexAt(grid, x, y);
-        prov = nearestProvince(map, h0 >= 0 ? h0 : h, px, py);
-      }
-      if (prov < 0) continue;
-      provOf[k] = prov + 1;
-      realmOf[k] = provRealm[prov] + 1;
-      regionOf[k] = provinces[prov].region + 1;
+    }
+    if (ids.length) {
+      let best = 0;
+      for (let t = 1; t < ids.length; t++) if (ws[t] > ws[best]) best = t;
+      return ids[best];
     }
   }
+  // land in a water hex (or warped off the grid): nearest land hex around it
+  const h0 = hexAt(grid, x, y);
+  const prov = nearestProvince(map, h0 >= 0 ? h0 : h, px, py);
+  return prov < 0 ? -1 : idOf(prov);
+}
+
+const nbrCache = new WeakMap<object, Int32Array>();
+/** Per worker: curved labels by realm/region, reused while their land is unchanged. */
+const labelCache = new Map<string, { sig: number; name: string; label: LabelCurve | null }>();
+function neighborsOf(map: MapData): Int32Array {
+  let n = nbrCache.get(map.grid);
+  if (!n) {
+    n = buildNeighbors(map.grid);
+    nbrCache.set(map.grid, n);
+  }
+  return n;
+}
+
+export function buildRenderAssets(
+  map: MapData,
+  onProgress: (s: string, f: number) => void = () => {},
+  reuse?: Pick<RenderAssets, 'warp' | 'warpW' | 'warpH'>,
+): RenderAssets {
+  const { grid, hex, provinces, regions } = map;
+
+  onProgress('Inking borders', 0.8);
+  // the warp depends only on the seed: an edit can hand the previous one back
+  const { warp, warpW, warpH } = reuse ? { warp: reuse.warp.slice(), warpW: reuse.warpW, warpH: reuse.warpH } : buildWarp(map);
+  const provRealm = provinces.map((p) => (p.region >= 0 ? regions[p.region].realm : -1));
 
   onProgress('Measuring coasts', 0.86);
-  const distData = new Uint8Array(n * 4);
+  const coastW = map.height.w;
+  const coastH = map.height.h;
+  const coast = new Uint8Array(coastW * coastH);
   {
-    const seed = new Uint8Array(n);
-    for (let j = 0; j < idH; j++)
-      for (let i = 0; i < idW; i++) {
-        const k = j * idW + i;
-        if (i + 1 < idW && land[k] !== land[k + 1]) seed[k] = seed[k + 1] = 1;
-        if (j + 1 < idH && land[k] !== land[k + idW]) seed[k] = seed[k + idW] = 1;
+    const hd = map.height.data;
+    const seed = new Uint8Array(coastW * coastH);
+    for (let j = 0; j < coastH; j++)
+      for (let i = 0; i < coastW; i++) {
+        const k = j * coastW + i;
+        const l = hd[k] >= 0;
+        if (i + 1 < coastW && l !== hd[k + 1] >= 0) seed[k] = seed[k + 1] = 1;
+        if (j + 1 < coastH && l !== hd[k + coastW] >= 0) seed[k] = seed[k + coastW] = 1;
       }
-    const d = distanceTransform(seed, idW, idH, 255 / COAST_SCALE);
-    for (let k = 0; k < n; k++) distData[k * 4 + 2] = Math.round(d[k] * COAST_SCALE);
+    const d = distanceTransform(seed, coastW, coastH, 255 / COAST_SCALE);
+    for (let k = 0; k < coast.length; k++) coast[k] = Math.round(d[k] * COAST_SCALE);
   }
 
-  const hexOwners = new Uint8Array(grid.cols * grid.rows * 4);
-  for (let k = 0; k < grid.cols * grid.rows; k++) {
-    const p = hex.province[k];
-    if (p < 0) continue;
-    hexOwners[k * 4] = (p + 1) & 255;
-    hexOwners[k * 4 + 1] = (p + 1) >> 8;
-    hexOwners[k * 4 + 2] = (provRealm[p] + 1) & 255;
-    hexOwners[k * 4 + 3] = (provRealm[p] + 1) >> 8;
-  }
   const nHex = grid.cols * grid.rows;
+  const hexOwners = new Uint8Array(nHex * 4);
   const hexAux = new Uint8Array(nHex * 4);
   const hexData = new Float32Array(nHex * 4);
   for (let k = 0; k < nHex; k++) {
     const p = hex.province[k];
     if (p >= 0) {
+      hexOwners[k * 4] = (p + 1) & 255;
+      hexOwners[k * 4 + 1] = (p + 1) >> 8;
+      hexOwners[k * 4 + 2] = (provRealm[p] + 1) & 255;
+      hexOwners[k * 4 + 3] = (provRealm[p] + 1) >> 8;
       const rg = provinces[p].region + 1;
       hexAux[k * 4] = rg & 255;
       hexAux[k * 4 + 1] = rg >> 8;
@@ -203,39 +204,48 @@ export function buildRenderAssets(map: MapData, onProgress: (s: string, f: numbe
     hexData[k * 4 + 2] = hex.moisture[k];
     hexData[k * 4 + 3] = hex.flags[k];
   }
+  onProgress('Fields', 0.9);
   const { farm, farmW, farmH } = buildFarmField(map);
-  const warp = new Float32Array(ww * wh * 2);
-  for (let k = 0; k < ww * wh; k++) {
-    warp[k * 2] = warpX[k];
-    warp[k * 2 + 1] = warpY[k];
-  }
+  const paint = buildPaintField(map, farmW, farmH);
 
   onProgress('Lettering', 0.92);
-  const texelOwner = (ids: Uint16Array) => (x: number, y: number) => {
-    const i = Math.floor(x * ID_RES);
-    const j = Math.floor(y * ID_RES);
-    if (i < 0 || j < 0 || i >= idW || j >= idH) return 0;
-    return ids[j * idW + i];
+  const va = { warp, warpW, warpH };
+  // Curved labels are the slow part of a rebuild; a realm or region whose
+  // land did not change keeps the label it had.
+  const cached = (kind: string, id: number, name: string, hexes: number[], make: () => LabelCurve | null) => {
+    let sig = 2166136261 ^ hexes.length;
+    for (const h of hexes) sig = Math.imul(sig ^ h, 16777619);
+    const key = `${map.meta.params.seed}|${grid.cols}x${grid.rows}|${kind}|${id}`;
+    const hit = labelCache.get(key);
+    if (hit && hit.sig === sig && hit.name === name) return hit.label;
+    const label = make();
+    labelCache.set(key, { sig, name, label });
+    return label;
   };
   const realmLabels: CurveLabel[] = [];
   map.realms.forEach((r) => {
-    const pts: [number, number][] = [];
-    for (const rk of r.regions) for (const pk of regions[rk].provinces) for (const h of provinces[pk].hexes) pts.push(hexXY(map, h));
-    const c = curveLabel(pts, r.id + 1, texelOwner(realmOf), r.name);
+    if (r.retired) return;
+    const hexes: number[] = [];
+    for (const rk of r.regions) for (const pk of regions[rk].provinces) for (const h of provinces[pk].hexes) hexes.push(h);
+    const c = cached('realm', r.id, r.name, hexes, () => curveLabel(hexes.map((h) => hexXY(map, h)), r.id, (x, y) => ownerAt(map, va, x, y, 'realm'), r.name));
     if (c) realmLabels.push({ ...c, text: r.name, id: r.id });
   });
   const regionLabels: CurveLabel[] = [];
   regions.forEach((rg) => {
-    const pts: [number, number][] = [];
-    for (const pk of rg.provinces) for (const h of provinces[pk].hexes) pts.push(hexXY(map, h));
-    const c = curveLabel(pts, rg.id + 1, texelOwner(regionOf), rg.name);
+    if (rg.retired) return;
+    const hexes: number[] = [];
+    for (const pk of rg.provinces) for (const h of provinces[pk].hexes) hexes.push(h);
+    const c = cached('region', rg.id, rg.name, hexes, () => curveLabel(hexes.map((h) => hexXY(map, h)), rg.id, (x, y) => ownerAt(map, va, x, y, 'region'), rg.name));
     if (c) regionLabels.push({ ...c, text: rg.name, id: rg.id });
   });
-  const provinceLabels = provinces.map((p) => {
+  const provinceLabels: PointLabel[] = [];
+  for (const p of provinces) {
+    if (p.retired || !p.hexes.length) continue;
     const [x, y] = labelPoint(map, p.hexes, p.id);
-    return { x, y, size: Math.min(1.5, Math.max(0.55, Math.sqrt(p.hexes.length) * 0.2)), text: p.name, id: p.id };
-  });
+    provinceLabels.push({ x, y, size: Math.min(1.5, Math.max(0.55, Math.sqrt(p.hexes.length) * 0.2)), text: p.name, id: p.id });
+  }
 
+  onProgress('Rivers', 0.96);
   const river = buildRiverMesh(map);
 
   const realmPalette = new Uint8Array((map.realms.length + 1) * 4);
@@ -243,11 +253,11 @@ export function buildRenderAssets(map: MapData, onProgress: (s: string, f: numbe
     realmPalette.set([r.color[0], r.color[1], r.color[2], 255], (r.id + 1) * 4);
   });
 
-  return { idW, idH, provinceIds: provOf, distData, hexOwners, hexAux, hexData, farm, farmW, farmH, warp, warpW: ww, warpH: wh, realmLabels, regionLabels, provinceLabels, river, realmPalette };
+  return { coast, coastW, coastH, coastRes: map.height.res, hexOwners, hexAux, hexData, farm, farmW, farmH, paint, warp, warpW, warpH, realmLabels, regionLabels, provinceLabels, river, realmPalette };
 }
 
 export function transferablesOf(a: RenderAssets): ArrayBuffer[] {
-  return [a.hexOwners.buffer, a.hexAux.buffer, a.hexData.buffer, a.farm.buffer, a.warp.buffer, a.provinceIds.buffer, a.distData.buffer, a.river.position.buffer, a.river.normal.buffer, a.river.width.buffer, a.river.index.buffer, a.realmPalette.buffer] as ArrayBuffer[];
+  return [a.coast.buffer, a.hexOwners.buffer, a.hexAux.buffer, a.hexData.buffer, a.farm.buffer, a.paint.buffer, a.warp.buffer, a.river.position.buffer, a.river.normal.buffer, a.river.width.buffer, a.river.index.buffer, a.realmPalette.buffer] as ArrayBuffer[];
 }
 
 function hexXY(map: MapData, h: number): [number, number] {
@@ -488,9 +498,12 @@ function buildRiverMesh(map: MapData): RiverMesh {
   const nrm: number[] = [];
   const wid: number[] = [];
   const idx: number[] = [];
-  let thr = Infinity;
-  for (const r of map.rivers) thr = Math.min(thr, hex.flux[r.hexes[0]]);
-  if (!isFinite(thr)) thr = 1;
+  // width scale: the same flow threshold the generator uses for rivers, so a
+  // tiny hand-drawn stream does not make every other river swell
+  const landFlux: number[] = [];
+  for (let i = 0; i < hex.flux.length; i++) if (hex.flags[i] & HexFlag.Land) landFlux.push(hex.flux[i]);
+  landFlux.sort((a, b) => a - b);
+  const thr = Math.max(14, landFlux[Math.floor(landFlux.length * 0.935)] ?? 14);
   // stable per-hex jitter so confluences line up between rivers
   const jit = new Map<number, [number, number]>();
   const jitterOf = (h: number): [number, number] => {
@@ -519,7 +532,7 @@ function buildRiverMesh(map: MapData): RiverMesh {
       const last = k === path.length - 1;
       const [jx, jy] = last ? [0, 0] : jitterOf(h);
       const f = hex.flags[h] & HexFlag.Land ? hex.flux[h] : hex.flux[path[Math.max(0, k - 1)]];
-      let w = Math.min(0.5, 0.07 + 0.075 * Math.log2(f / thr + 1));
+      let w = Math.min(0.5, 0.07 + 0.075 * Math.log2(Math.max(f, thr * 0.5) / thr + 1));
       if (k < springs) w = 0.02 + 0.03 * k;
       else if (k === springs) w *= 0.6;
       return [x + jx, y + jy, w];
@@ -639,11 +652,91 @@ function buildFarmField(map: MapData): { farm: Float32Array; farmW: number; farm
   const nbr = buildNeighbors(grid);
   for (const p of map.provinces) {
     const c = p.capitalHex;
+    if (p.retired || c < 0) continue;
     if (arable(c) && hex.temperature[c] > 2) splat(c, 1, 2.2);
     for (let d = 0; d < 6; d++) {
       const j = nbr[c * 6 + d];
       if (j >= 0 && arable(j) && hex.temperature[j] > 2) splat(j, 0.7, 1.6);
     }
   }
+  // hand-painted terrain other than farmland clears the fields under it
+  const over = map.edits?.terrain;
+  if (over) {
+    for (let h = 0; h < over.length; h++) {
+      if (over[h] < 0 || over[h] === Terrain.Farmland) continue;
+      const row = Math.floor(h / grid.cols);
+      const cx = hexCenterX(h % grid.cols, row);
+      const cy = hexCenterY(row);
+      for (let j = Math.max(0, Math.floor(cy - 2)); j <= Math.min(farmH - 1, Math.ceil(cy + 2)); j++)
+        for (let i = Math.max(0, Math.floor(cx - 2)); i <= Math.min(farmW - 1, Math.ceil(cx + 2)); i++) {
+          const d2 = (i - cx) ** 2 + (j - cy) ** 2;
+          farm[j * farmW + i] *= 1 - Math.exp(-d2 / 0.8);
+        }
+    }
+  }
   return { farm, farmW, farmH };
+}
+
+/** Sea-level temperature and moisture that make the shader draw a terrain. */
+export function paintTargets(t: Terrain, tempC: number): [number, number] | null {
+  const c = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
+  switch (t) {
+    case Terrain.Plains:
+      return [c(tempC, 3, 24), 0.3];
+    case Terrain.Farmland:
+      return [c(tempC, 5, 24), 0.38];
+    case Terrain.Forest:
+      return [c(tempC, 4, 18), 0.74];
+    case Terrain.Jungle:
+      return [Math.max(tempC, 25), 0.88];
+    case Terrain.Taiga:
+      return [c(tempC, -1, 4), 0.62];
+    case Terrain.Desert:
+      return [Math.max(tempC, 20), 0.04];
+    case Terrain.Steppe:
+      return [c(tempC, 6, 22), 0.2];
+    case Terrain.Tundra:
+      return [c(tempC, -6, -2), 0.25];
+    case Terrain.Glacier:
+      return [Math.min(tempC, -14), 0.4];
+    case Terrain.Marsh:
+      return [c(tempC, 4, 22), 0.6];
+    default:
+      return null;
+  }
+}
+
+function buildPaintField(map: MapData, w: number, h: number): Float32Array {
+  const out = new Float32Array(w * h * 4);
+  const over = map.edits?.terrain;
+  if (!over) return out;
+  const { grid, hex } = map;
+  const sumT = new Float32Array(w * h);
+  const sumM = new Float32Array(w * h);
+  const sumW = new Float32Array(w * h);
+  for (let k = 0; k < over.length; k++) {
+    if (over[k] < 0) continue;
+    const tg = paintTargets(over[k] as Terrain, hex.temperature[k]);
+    if (!tg) continue;
+    // the shader subtracts the altitude lapse itself
+    const seaT = tg[0] + Math.max(0, hex.elevation[k]) * LAPSE;
+    const row = Math.floor(k / grid.cols);
+    const cx = hexCenterX(k % grid.cols, row);
+    const cy = hexCenterY(row);
+    for (let j = Math.max(0, Math.floor(cy - 3)); j <= Math.min(h - 1, Math.ceil(cy + 3)); j++)
+      for (let i = Math.max(0, Math.floor(cx - 3)); i <= Math.min(w - 1, Math.ceil(cx + 3)); i++) {
+        const wt = Math.exp(-((i - cx) ** 2 + (j - cy) ** 2) / 1.6);
+        const q = j * w + i;
+        sumT[q] += seaT * wt;
+        sumM[q] += tg[1] * wt;
+        sumW[q] += wt;
+      }
+  }
+  for (let q = 0; q < w * h; q++) {
+    if (sumW[q] <= 0) continue;
+    out[q * 4] = sumT[q] / sumW[q];
+    out[q * 4 + 1] = sumM[q] / sumW[q];
+    out[q * 4 + 2] = Math.min(1, sumW[q]);
+  }
+  return out;
 }

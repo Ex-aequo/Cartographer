@@ -7,6 +7,8 @@ export interface LoadedMap {
   map: MapData;
   assets: RenderAssets;
   ms: number;
+  /** false when this is the same world after an edit (keep the view where it is) */
+  fresh: boolean;
 }
 
 export interface Busy {
@@ -16,7 +18,7 @@ export interface Busy {
 
 type DistributiveOmit<T, K extends keyof any> = T extends unknown ? Omit<T, K> : never;
 
-type Pending = { resolve: (m: LoadedMap) => void; reject: (e: Error) => void };
+type Pending = { resolve: (m: LoadedMap) => void; reject: (e: Error) => void; quiet?: boolean };
 
 /** Runs generation and asset building off the main thread. */
 export function useMapWorker() {
@@ -30,14 +32,14 @@ export function useMapWorker() {
     w.onmessage = (e: MessageEvent<WorkerResponse>) => {
       const msg = e.data;
       if (msg.type === 'progress') {
-        setBusy({ step: msg.step, fraction: msg.fraction });
+        if (!pending.current.get(msg.id)?.quiet) setBusy({ step: msg.step, fraction: msg.fraction });
         return;
       }
       const p = pending.current.get(msg.id);
       pending.current.delete(msg.id);
-      if (pending.current.size === 0) setBusy(null);
+      if (![...pending.current.values()].some((q) => !q.quiet)) setBusy(null);
       if (!p) return;
-      if (msg.type === 'done') p.resolve({ map: msg.map, assets: msg.assets, ms: msg.ms });
+      if (msg.type === 'done') p.resolve({ map: msg.map, assets: msg.assets, ms: msg.ms, fresh: true });
       else p.reject(new Error(msg.message));
     };
     w.onerror = (e) => {
@@ -61,8 +63,17 @@ export function useMapWorker() {
     });
   }, []);
 
+  /** Rebuild after an edit. Runs without the full-screen veil. */
+  const rederive = useCallback((map: MapData, reuse: RenderAssets) => {
+    return new Promise<LoadedMap>((resolve, reject) => {
+      const id = nextId.current++;
+      pending.current.set(id, { resolve: (l) => resolve({ ...l, fresh: false }), reject, quiet: true });
+      worker.current!.postMessage({ type: 'rederive', id, map, reuse: { warp: reuse.warp, warpW: reuse.warpW, warpH: reuse.warpH } } as WorkerRequest);
+    });
+  }, []);
+
   const generate = useCallback((params: GenParams) => run({ type: 'generate', params }, 'Raising continents'), [run]);
   const open = useCallback((json: string) => run({ type: 'open', json }, 'Unrolling the map'), [run]);
 
-  return { generate, open, busy };
+  return { generate, open, rederive, busy };
 }

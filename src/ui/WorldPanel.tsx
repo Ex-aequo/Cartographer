@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type React from 'react';
 import type { GenParams, Template } from '../model/types';
 import { randomSeedWord } from '../util/rng';
 
@@ -22,28 +23,52 @@ const CLIMATES = [
   { label: 'Warm south, cold north', north: 31, south: -14 },
 ];
 
+export type PanelTab = 'world' | 'edit';
+
+interface PanelProps {
+  tab: PanelTab;
+  onTab(t: PanelTab): void;
+  children: React.ReactNode;
+}
+
+/** The left panel: drawing a new world, or editing this one. */
+export function SidePanel({ tab, onTab, children }: PanelProps) {
+  const [open, setOpen] = useState(true);
+  return (
+    <section className={`panel panel--world ${open ? '' : 'panel--closed'}`} aria-label={tab === 'world' ? 'New world' : 'Edit'}>
+      <header className="panel__head">
+        <div className="tabs" role="tablist">
+          <button role="tab" aria-selected={tab === 'world'} className={tab === 'world' ? 'is-on' : ''} onClick={() => (onTab('world'), setOpen(true))}>
+            New world
+          </button>
+          <button role="tab" aria-selected={tab === 'edit'} className={tab === 'edit' ? 'is-on' : ''} onClick={() => (onTab('edit'), setOpen(true))}>
+            Edit
+          </button>
+        </div>
+        <button className="icon-btn" onClick={() => setOpen(!open)} aria-expanded={open} aria-label={open ? 'Collapse panel' : 'Expand panel'}>
+          {open ? '−' : '+'}
+        </button>
+      </header>
+      {open && children}
+    </section>
+  );
+}
+
 interface Props {
   params: GenParams;
   onChange(p: GenParams): void;
   onGenerate(p: GenParams): void;
   busy: boolean;
+  /** this world has hand edits that drawing a new one would throw away */
+  hasEdits: boolean;
 }
 
-export function WorldPanel({ params, onChange, onGenerate, busy }: Props) {
-  const [open, setOpen] = useState(true);
+export function WorldPanel({ params, onChange, onGenerate, busy, hasEdits }: Props) {
   const set = <K extends keyof GenParams>(k: K, v: GenParams[K]) => onChange({ ...params, [k]: v });
   const sizeIdx = SIZES.findIndex((s) => s.cols === params.cols);
   const climateIdx = CLIMATES.findIndex((c) => c.north === params.tempNorth && c.south === params.tempSouth);
 
   return (
-    <section className={`panel panel--world ${open ? '' : 'panel--closed'}`} aria-label="New world">
-      <header className="panel__head">
-        <h2>New world</h2>
-        <button className="icon-btn" onClick={() => setOpen(!open)} aria-expanded={open} aria-label={open ? 'Collapse panel' : 'Expand panel'}>
-          {open ? '−' : '+'}
-        </button>
-      </header>
-      {open && (
         <form
           className="panel__body"
           onSubmit={(e) => {
@@ -110,12 +135,11 @@ export function WorldPanel({ params, onChange, onGenerate, busy }: Props) {
           <Slider label="Province size" value={params.provinceSize} min={12} max={80} step={1} format={(v) => `${v} hexes`} onChange={(v) => set('provinceSize', v)} />
           <Slider label="Realms" value={params.realmCount} min={3} max={80} step={1} format={(v) => String(v)} onChange={(v) => set('realmCount', v)} />
 
+          {hasEdits && <p className="warn">Drawing a new world replaces this one, including your edits. Save first to keep them.</p>}
           <button type="submit" className="btn btn--seal" disabled={busy}>
-            {busy ? 'Drawing…' : 'Draw this world'}
+            {busy ? 'Drawing…' : hasEdits ? 'Discard edits and draw' : 'Draw this world'}
           </button>
         </form>
-      )}
-    </section>
   );
 }
 

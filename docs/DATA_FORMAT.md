@@ -5,8 +5,9 @@ Two files come out of Cartographer:
 - **Project file** (`.cartomap`): everything needed to reopen a map exactly.
   Gzip-compressed JSON with typed arrays stored as base64. Meant for the app,
   not for games; its internals may grow between versions (`version` field).
-  Version 2 stores the art heightfield as 16-bit integers (about 40% smaller);
-  version 1 files still open.
+  Version 2 stores the art heightfield as 16-bit integers (about 35% smaller).
+  Version 3 adds hand edits (painted terrain, erased and drawn rivers, which
+  hexes were edited) and retired ids. Versions 1 and 2 still open.
 - **Game data** (`*-gamedata.json`): a readable, stable export for engines and
   tools. Documented below.
 
@@ -65,6 +66,8 @@ Two files come out of Cartographer:
 | `riverFlow` | number | Accumulated flow where `river` is true. |
 | `flowsTo` | int | Downstream hex id, −1 for water. Every land hex drains to the sea. |
 | `province` | int | Province id, −1 for water. |
+| `edited` | bool | Changed by hand in the editor (height, terrain or river). |
+| `paintedTerrain` | bool | `terrain` was set by hand and overrides the climate. |
 
 Codes are stable: a code is never renumbered, new codes are only added.
 
@@ -81,10 +84,23 @@ Codes are stable: a code is never renumbered, new codes are only added.
 | `neighbors` | Provinces sharing a land border. |
 | `seaNeighbors` | Provinces across at most four hexes of water (for naval movement). |
 
+Each province also carries `retired` (see below).
+
+### Retired ids
+
+Editing can remove a province entirely (its land flooded). Its id is then
+**retired**: it stays in the list with `retired: true` and no hexes, and is
+never reused, so ids a game has stored stay valid. Regions and realms work the
+same way. The top-level `retired` object lists the retired ids of each kind:
+
+```jsonc
+"retired": { "provinces": [17], "regions": [], "realms": [] }
+```
+
 ### regions[], realms[], cultures[], rivers[]
 
-- **regions**: `id`, `name`, `realm`, `capitalProvince`, `provinces`.
-- **realms**: `id`, `name`, `title` (Empire, Kingdom, Grand Duchy, Duchy,
+- **regions**: `id`, `retired`, `name`, `realm`, `capitalProvince`, `provinces`.
+- **realms**: `id`, `retired`, `name`, `title` (Empire, Kingdom, Grand Duchy, Duchy,
   County), `culture`, `color` (`#rrggbb`), `capitalProvince`, `regions`.
 - **cultures**: `id`, `name`.
 - **rivers**: `id`, `name`, `hexes` from source to the water or river it joins.

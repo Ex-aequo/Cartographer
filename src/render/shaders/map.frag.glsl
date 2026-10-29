@@ -23,6 +23,7 @@ uniform sampler2D tClimate;  // R: sea-level temperature °C, G: moisture 0..1
 uniform vec2 uClimateSpan;
 uniform sampler2D tHex;      // per hex: RG province+1, BA realm+1 (nearest, cols x rows)
 uniform vec2 uGrid;          // cols, rows
+uniform sampler2D tPaint;    // painted terrain: R sea-level °C, G moisture, B weight (same grid as tFarm)
 uniform sampler2D tFarm;     // cultivation 0..1, 1 texel per world unit (linear)
 uniform vec2 uFarmSpan;
 uniform sampler2D tHexAux;   // per hex: RG region+1, B biome, A terrain (nearest)
@@ -31,7 +32,7 @@ uniform sampler2D tWarp;     // RG border warp offset, world units (linear)
 uniform vec2 uWarpSize;      // texels; grid point i sits at world i / 2
 uniform float uSigma2;       // border smoothing kernel (shrinks toward hex edges at hex zoom)
 uniform float uWarpAmt;
-uniform sampler2D tDist;     // B: coast distance
+uniform sampler2D tDist;     // R: coast distance (heightfield grid)
 uniform vec2 uIdSpan;
 uniform float uIdRes;        // texels per world unit
 uniform float uCoastScale;
@@ -729,10 +730,13 @@ void main() {
   vec3 hg = relief(p, bhg);
   float h = hg.x;
   vec2 clim = textureBSpline(tClimate, p / uClimateSpan).rg;
-  float tempC = clim.r - max(h, 0.0) * uLapse;
-  float moist = clim.g;
+  vec4 painted = texture(tPaint, (p + 0.5) / uFarmSpan);
+  // ragged, natural edge to painted ground instead of the shape of the brush
+  painted.b = smoothstep(0.15, 0.85, painted.b + 0.35 * (snoise(p * 0.55) * 0.6 + snoise(p * 1.7) * 0.4) * (1.0 - painted.b) * 2.0 * painted.b);
+  float tempC = mix(clim.r, painted.r, painted.b) - max(h, 0.0) * uLapse;
+  float moist = mix(clim.g, painted.g, painted.b);
 
-  float coastDist = texture(tDist, p / uIdSpan).b * 255.0 / uCoastScale / uIdRes; // world units
+  float coastDist = texture(tDist, p / uIdSpan).r * 255.0 / uCoastScale / uIdRes; // world units
   Owner po;
   Owner ro;
   Owner go;

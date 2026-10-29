@@ -24,7 +24,6 @@ export function buildPolitical(p: GenParams, grid: Grid, hex: HexLayers, nbr: In
     cx[i] = hexCenterX(i % grid.cols, row);
     cy[i] = hexCenterY(row);
   }
-  const isLand = (i: number) => (hex.flags[i] & HexFlag.Land) !== 0;
 
   // ---------- Provinces ----------
   const owner = growProvinces(p, grid, hex, nbr, cx, cy, rng.fork('prov'));
@@ -42,101 +41,11 @@ export function buildPolitical(p: GenParams, grid: Grid, hex: HexLayers, nbr: In
   for (let i = 0; i < n; i++) hex.province[i] = owner.of[i] >= 0 ? remap[owner.of[i]] : -1;
 
   const provinces: Province[] = order.map((o, id) => {
-    let sx = 0;
-    let sy = 0;
-    for (const h of o.hs) {
-      sx += cx[h];
-      sy += cy[h];
-    }
-    const center: [number, number] = [sx / o.hs.length, sy / o.hs.length];
-    const counts = new Map<number, number>();
-    let coastal = false;
-    let best = o.hs[0];
-    let bestScore = Infinity;
-    for (const h of o.hs) {
-      counts.set(hex.terrain[h], (counts.get(hex.terrain[h]) ?? 0) + 1);
-      if (hex.flags[h] & HexFlag.Coastal) coastal = true;
-      let score = Math.hypot(cx[h] - center[0], cy[h] - center[1]);
-      if (hex.flags[h] & HexFlag.River) score -= 1.6;
-      if (hex.flags[h] & HexFlag.Coastal) score -= 0.9;
-      if (hex.relief[h] >= Relief.Mountains) score += 4;
-      if (hex.relief[h] === Relief.Hills) score += 0.6;
-      if (score < bestScore) {
-        bestScore = score;
-        best = h;
-      }
-    }
-    let terrain = Terrain.Plains;
-    let tc = -1;
-    counts.forEach((c, t) => {
-      if (c > tc) {
-        tc = c;
-        terrain = t as Terrain;
-      }
-    });
-    hex.flags[best] |= HexFlag.Capital;
-    return { id, name: '', hexes: o.hs, capitalHex: best, region: -1, neighbors: [], seaNeighbors: [], coastal, center, terrain };
+    const f = provinceFacts(hex, o.hs, cx, cy, -1);
+    hex.flags[f.capitalHex] |= HexFlag.Capital;
+    return { id, name: '', hexes: o.hs, region: -1, neighbors: [], seaNeighbors: [], ...f };
   });
-
-  // Land adjacency.
-  const nb = provinces.map(() => new Set<number>());
-  for (let i = 0; i < n; i++) {
-    const a = hex.province[i];
-    if (a < 0) continue;
-    for (let d = 0; d < 6; d++) {
-      const j = nbr[i * 6 + d];
-      if (j < 0) continue;
-      const b = hex.province[j];
-      if (b >= 0 && b !== a) nb[a].add(b);
-    }
-  }
-  provinces.forEach((pr, k) => (pr.neighbors = [...nb[k]].sort((a, b) => a - b)));
-
-  // Sea adjacency: provinces facing each other across ≤ 4 hexes of water.
-  const seaNb = provinces.map(() => new Set<number>());
-  {
-    const label = new Int32Array(n).fill(-1);
-    const dist = new Int32Array(n).fill(99);
-    let frontier: number[] = [];
-    for (let i = 0; i < n; i++) {
-      if (!isLand(i) || hex.province[i] < 0) continue;
-      for (let d = 0; d < 6; d++) {
-        const j = nbr[i * 6 + d];
-        if (j >= 0 && !isLand(j)) {
-          if (label[j] === -1) {
-            label[j] = hex.province[i];
-            dist[j] = 1;
-            frontier.push(j);
-          } else if (label[j] !== hex.province[i]) {
-            link(label[j], hex.province[i]);
-          }
-        }
-      }
-    }
-    for (let step = 1; step < 4 && frontier.length; step++) {
-      const next: number[] = [];
-      for (const i of frontier) {
-        for (let d = 0; d < 6; d++) {
-          const j = nbr[i * 6 + d];
-          if (j < 0 || isLand(j)) continue;
-          if (label[j] === -1) {
-            label[j] = label[i];
-            dist[j] = step + 1;
-            next.push(j);
-          } else if (label[j] !== label[i] && dist[j] + dist[i] <= 5) {
-            link(label[j], label[i]);
-          }
-        }
-      }
-      frontier = next;
-    }
-    function link(a: number, b: number) {
-      if (a === b || nb[a].has(b)) return;
-      seaNb[a].add(b);
-      seaNb[b].add(a);
-    }
-  }
-  provinces.forEach((pr, k) => (pr.seaNeighbors = [...seaNb[k]].sort((a, b) => a - b)));
+  computeAdjacency(provinces, hex, nbr);
 
   // ---------- Regions ----------
   const regionOf = clusterGraph(
@@ -202,7 +111,7 @@ export function buildPolitical(p: GenParams, grid: Grid, hex: HexLayers, nbr: In
   const paletteOrder = cultureRng.shuffle(Array.from({ length: PALETTE_COUNT }, (_, k) => k));
   const nameCultures: NameCulture[] = cultureSeeds.map((_, k) => makeCulture(cultureRng, paletteOrder[k % PALETTE_COUNT]));
   const forge = new NameForge(rng.fork('names'));
-  const cultures: Culture[] = nameCultures.map((c, id) => ({ id, name: forge.word(c, 2, 2, 0) }));
+  const cultures: Culture[] = nameCultures.map((c, id) => ({ id, name: forge.word(c, 2, 2, 0), palette: paletteOrder[id % PALETTE_COUNT] }));
 
   const realms: Realm[] = Array.from({ length: realmCount }, (_, id) => ({
     id,
@@ -252,6 +161,107 @@ export function buildPolitical(p: GenParams, grid: Grid, hex: HexLayers, nbr: In
 }
 
 // ---------------------------------------------------------------------------
+
+/** Centre, dominant terrain, coast flag and settlement hex of a province.
+ *  The settlement stays where it was (`keepCapital`) while that hex is still inside. */
+export function provinceFacts(hex: HexLayers, hs: number[], cx: Float32Array, cy: Float32Array, keepCapital: number) {
+  let sx = 0;
+  let sy = 0;
+  for (const h of hs) {
+    sx += cx[h];
+    sy += cy[h];
+  }
+  const center: [number, number] = [sx / hs.length, sy / hs.length];
+  const counts = new Map<number, number>();
+  let coastal = false;
+  let best = hs[0];
+  let bestScore = Infinity;
+  let keep = false;
+  for (const h of hs) {
+    counts.set(hex.terrain[h], (counts.get(hex.terrain[h]) ?? 0) + 1);
+    if (hex.flags[h] & HexFlag.Coastal) coastal = true;
+    if (h === keepCapital) keep = true;
+    let score = Math.hypot(cx[h] - center[0], cy[h] - center[1]);
+    if (hex.flags[h] & HexFlag.River) score -= 1.6;
+    if (hex.flags[h] & HexFlag.Coastal) score -= 0.9;
+    if (hex.relief[h] >= Relief.Mountains) score += 4;
+    if (hex.relief[h] === Relief.Hills) score += 0.6;
+    if (score < bestScore) {
+      bestScore = score;
+      best = h;
+    }
+  }
+  let terrain = Terrain.Plains;
+  let tc = -1;
+  counts.forEach((c, t) => {
+    if (c > tc) {
+      tc = c;
+      terrain = t as Terrain;
+    }
+  });
+  return { center, coastal, terrain, capitalHex: keep ? keepCapital : best };
+}
+
+/** Land neighbours, and neighbours across at most four hexes of water. */
+export function computeAdjacency(provinces: Province[], hex: HexLayers, nbr: Int32Array): void {
+  const n = hex.province.length;
+  const isLand = (i: number) => (hex.flags[i] & HexFlag.Land) !== 0;
+  const nb = provinces.map(() => new Set<number>());
+  for (let i = 0; i < n; i++) {
+    const a = hex.province[i];
+    if (a < 0) continue;
+    for (let d = 0; d < 6; d++) {
+      const j = nbr[i * 6 + d];
+      if (j < 0) continue;
+      const b = hex.province[j];
+      if (b >= 0 && b !== a) nb[a].add(b);
+    }
+  }
+  provinces.forEach((pr, k) => (pr.neighbors = [...nb[k]].sort((a, b) => a - b)));
+
+  const seaNb = provinces.map(() => new Set<number>());
+  const label = new Int32Array(n).fill(-1);
+  const dist = new Int32Array(n).fill(99);
+  const link = (a: number, b: number) => {
+    if (a === b || nb[a].has(b)) return;
+    seaNb[a].add(b);
+    seaNb[b].add(a);
+  };
+  let frontier: number[] = [];
+  for (let i = 0; i < n; i++) {
+    if (!isLand(i) || hex.province[i] < 0) continue;
+    for (let d = 0; d < 6; d++) {
+      const j = nbr[i * 6 + d];
+      if (j >= 0 && !isLand(j)) {
+        if (label[j] === -1) {
+          label[j] = hex.province[i];
+          dist[j] = 1;
+          frontier.push(j);
+        } else if (label[j] !== hex.province[i]) {
+          link(label[j], hex.province[i]);
+        }
+      }
+    }
+  }
+  for (let step = 1; step < 4 && frontier.length; step++) {
+    const next: number[] = [];
+    for (const i of frontier) {
+      for (let d = 0; d < 6; d++) {
+        const j = nbr[i * 6 + d];
+        if (j < 0 || isLand(j)) continue;
+        if (label[j] === -1) {
+          label[j] = label[i];
+          dist[j] = step + 1;
+          next.push(j);
+        } else if (label[j] !== label[i] && dist[j] + dist[i] <= 5) {
+          link(label[j], label[i]);
+        }
+      }
+    }
+    frontier = next;
+  }
+  provinces.forEach((pr, k) => (pr.seaNeighbors = [...seaNb[k]].sort((a, b) => a - b)));
+}
 
 function growProvinces(p: GenParams, grid: Grid, hex: HexLayers, nbr: Int32Array, cx: Float32Array, cy: Float32Array, rng: Rng): { of: Int32Array; count: number } {
   const n = grid.cols * grid.rows;

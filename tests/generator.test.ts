@@ -4,7 +4,7 @@ import { DEFAULT_PARAMS, HexFlag, type GenParams, type MapData } from '../src/mo
 import { buildNeighbors, sampleField } from '../src/model/hex';
 import { mapFromJSON, mapToJSON } from '../src/model/serialize';
 import { buildGameExport } from '../src/model/exportGame';
-import { buildRenderAssets } from '../src/render/assets';
+import { buildRenderAssets, ownerAt } from '../src/render/assets';
 
 const SMALL: GenParams = { ...DEFAULT_PARAMS, cols: 110, rows: 70, realmCount: 10, seed: 'test-seed' };
 const cache = new Map<string, MapData>();
@@ -124,12 +124,12 @@ describe('generator', () => {
           const row = Math.floor(i / map.grid.cols);
           const x = Math.sqrt(3) * ((i % map.grid.cols) + 0.5 * (row & 1)) + Math.sqrt(3) / 2;
           const y = 1.5 * row + 1;
-          const k = Math.floor(y * 6) * a.idW + Math.floor(x * 6);
-          const pickedLand = a.provinceIds[k] > 0;
+          const picked = ownerAt(map, a, x, y);
+          const pickedLand = picked >= 0;
           const dataLand = map.hex.province[i] >= 0;
           if (pickedLand !== dataLand) mismatch++;
           if (sampleField(map.height, x, y) >= 0 !== dataLand) mismatch++;
-          if (dataLand && pickedLand) expect(a.provinceIds[k] - 1).toBe(map.hex.province[i]);
+          if (dataLand && pickedLand) expect(picked).toBe(map.hex.province[i]);
         }
         expect(mismatch).toBe(0);
       });
@@ -145,7 +145,7 @@ describe('files', () => {
     expect(back.height.data).toBeInstanceOf(Float32Array);
     let maxErr = 0;
     for (let i = 0; i < m.height.data.length; i++) maxErr = Math.max(maxErr, Math.abs(back.height.data[i] - m.height.data[i]));
-    expect(maxErr).toBeLessThan(2e-5);
+    expect(maxErr).toBeLessThan(4e-5); // 16-bit step, plus sea kept below zero
     expect(back.provinces).toEqual(m.provinces);
   });
 

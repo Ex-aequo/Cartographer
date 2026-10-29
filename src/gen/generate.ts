@@ -23,7 +23,12 @@ export function generateMap(params: GenParams, onProgress: Progress = () => {}):
   const baseTemp = generateTemperature(p, width, height, rng);
   const moisture = generateMoisture(p, hf, baseTemp, width, height, rng);
   onProgress('Carving rivers and lakes', 0.5);
-  const { hex, nbr, rivers } = buildHexes(p, grid, hf, baseTemp, moisture, rng);
+  // first pass finds the lakes and carves them into the land …
+  buildHexes(p, grid, hf, baseTemp, moisture, rng);
+  // … then rain and rivers are worked out on the final land. This is exactly
+  // what an edit later recomputes, so an untouched map rebuilds identically.
+  const finalMoisture = generateMoisture(p, hf, baseTemp, width, height, rng);
+  const { hex, nbr, rivers } = buildHexes(p, grid, hf, baseTemp, finalMoisture, rng, { autoLakes: false });
   onProgress('Drawing borders', 0.7);
   const pol = buildPolitical(p, grid, hex, nbr, rivers, rng);
 
@@ -35,7 +40,7 @@ export function generateMap(params: GenParams, onProgress: Progress = () => {}):
     world: { width, height },
     height: hf,
     baseTemp,
-    moisture,
+    moisture: finalMoisture,
     hex,
     provinces: pol.provinces,
     regions: pol.regions,

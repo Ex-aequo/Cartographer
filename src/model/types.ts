@@ -12,8 +12,9 @@
  */
 
 export const FORMAT_ID = 'cartographer-map';
-/** 2: heightfield stored as 16-bit integers; erosion setting added. Version 1 files still open. */
-export const FORMAT_VERSION = 2;
+/** 2: heightfield stored as 16-bit integers; erosion setting added.
+ *  3: hand edits, retired ids. Versions 1 and 2 still open. */
+export const FORMAT_VERSION = 3;
 
 export type Template = 'continents' | 'pangaea' | 'archipelago' | 'inland-sea';
 
@@ -178,6 +179,8 @@ export interface HexLayers {
 
 export interface Province {
   id: number;
+  /** True once every hex of the province is gone (flooded, merged). The id is never reused. */
+  retired?: boolean;
   name: string;
   hexes: number[];
   capitalHex: number;
@@ -195,6 +198,7 @@ export interface Province {
 
 export interface Region {
   id: number;
+  retired?: boolean;
   name: string;
   provinces: number[];
   realm: number;
@@ -203,6 +207,7 @@ export interface Region {
 
 export interface Realm {
   id: number;
+  retired?: boolean;
   name: string;
   /** Rank title, e.g. "Kingdom". */
   title: string;
@@ -215,7 +220,23 @@ export interface Realm {
 export interface Culture {
   id: number;
   name: string;
+  /** Sound palette used for its names (so edits can name new places in the same style). */
+  palette?: number;
 }
+
+/** Hand edits that derived data must respect. One entry per hex unless noted. */
+export interface EditLayers {
+  /** Painted terrain code, −1 = none (climate decides). */
+  terrain: Int8Array;
+  /** 1 = a river must not run here (nor upstream of here). */
+  riverBlock: Uint8Array;
+  /** Rivers drawn by hand: hex paths from source to where they join water or another river. */
+  riverPaths: number[][];
+  /** Bit flags of what was edited by hand: 1 height, 2 terrain, 4 river. */
+  touched: Uint8Array;
+}
+
+export const Touched = { Height: 1, Terrain: 2, River: 4 } as const;
 
 export interface River {
   id: number;
@@ -263,4 +284,6 @@ export interface MapData {
   rivers: River[];
   /** Custom game data layers (Phase 3). Kept in the format from day one. */
   layers: unknown[];
+  /** Hand edits (format 3). Absent on maps nobody has edited. */
+  edits?: EditLayers;
 }
