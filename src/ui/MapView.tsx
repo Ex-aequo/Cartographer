@@ -4,7 +4,7 @@ import { drawPlacement, setSymbolReadyCallback } from '../render/symbols';
 import type { SymbolBridge } from '../state/useSymbols';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
 import type { LoadedMap } from '../state/useMapWorker';
-import { MapRenderer, ZOOM, hexFactor, paperMixFor, type MapMode, type Quality, type View } from '../render/MapRenderer';
+import { MapRenderer, ZOOM, borderSnap, paperMixFor, type MapMode, type Quality, type View } from '../render/MapRenderer';
 import { DEFAULT_CAMERA, MAX_TILT, projector, reliefAt, wrapAngle, type Camera3D } from '../render/camera';
 import { drawLabels, labelAt, type DrawnLabel } from '../render/LabelLayer';
 import { hexAt } from '../model/hex';
@@ -391,7 +391,7 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ edito
       const hex = hexAt(l.map.grid, wx, wy);
       if (hex < 0) return null;
       // borders follow hex edges at hex zoom; elsewhere they are the drawn, smoothed lines
-      const province = hexFactor(view.current.zoom) > 0.5 ? l.map.hex.province[hex] : ownerAt(l.map, l.assets, wx, wy);
+      const province = borderSnap(view.current.zoom) > 0.5 ? l.map.hex.province[hex] : ownerAt(l.map, l.assets, wx, wy);
       return { hex, province };
     };
 
