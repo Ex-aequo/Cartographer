@@ -1,6 +1,24 @@
 import { BIOME_NAMES, HexFlag, RELIEF_NAMES, TERRAIN_NAMES, type MapData } from './types';
 import { hexCenterX, hexCenterY, toAxial } from './hex';
 import { DEPTH_METRES, ELEVATION_METRES } from '../gen/biomes';
+import type { DataLayer } from './layers';
+
+/** A layer value as plain JSON: category id (or null), number, true/false, or a list of tag ids. */
+export function exportValue(l: DataLayer, i: number): number | boolean | number[] | null {
+  const v = l.values[i];
+  switch (l.def.type) {
+    case 'category':
+      return v < 0 ? null : v;
+    case 'flag':
+      return v !== 0;
+    case 'tags':
+      return l.def.categories.filter((c) => (v >>> 0) & (1 << c.id)).map((c) => c.id);
+    default:
+      return v;
+  }
+}
+const dataOf = (ls: DataLayer[], i: number) => Object.fromEntries(ls.map((l) => [l.def.id, exportValue(l, i)]));
+
 
 export const GAME_EXPORT_SCHEMA = 'cartographer-game-data';
 export const GAME_EXPORT_VERSION = 1;
@@ -12,6 +30,8 @@ export const GAME_EXPORT_VERSION = 1;
 export function buildGameExport(map: MapData) {
   const { cols, rows } = map.grid;
   const hexes = [];
+  const hexLayers = (map.layers ?? []).filter((l) => l.def.scope === 'hex');
+  const provLayers = (map.layers ?? []).filter((l) => l.def.scope === 'province');
   for (let row = 0; row < rows; row++) {
     for (let col = 0; col < cols; col++) {
       const i = row * cols + col;
@@ -44,7 +64,8 @@ export function buildGameExport(map: MapData) {
         flowsTo: map.hex.flowTo[i],
         province: map.hex.province[i],
         edited: map.edits ? map.edits.touched[i] !== 0 : false,
-        paintedTerrain: map.edits && map.edits.terrain[i] >= 0,
+        paintedTerrain: !!map.edits && map.edits.terrain[i] >= 0,
+        data: dataOf(hexLayers, i),
       });
     }
   }
@@ -67,7 +88,7 @@ export function buildGameExport(map: MapData) {
       name: r.name,
       title: r.title,
       culture: r.culture,
-      color: '#' + r.color.map((c) => c.toString(16).padStart(2, '0')).join(''),
+      color: hex(r.color),
       capitalProvince: r.capitalProvince,
       regions: r.regions,
     })),
@@ -87,15 +108,30 @@ export function buildGameExport(map: MapData) {
       hexes: p.hexes,
       neighbors: p.neighbors,
       seaNeighbors: p.seaNeighbors,
+      data: dataOf(provLayers, p.id),
     })),
     cultures: map.cultures,
     rivers: map.rivers.map((r) => ({ id: r.id, name: r.name, hexes: r.hexes })),
     hexes,
-    layers: map.layers,
+    layers: (map.layers ?? []).map(({ def }) => ({
+      id: def.id,
+      name: def.name,
+      type: def.type,
+      scope: def.scope,
+      categories: def.type === 'category' || def.type === 'tags' ? def.categories.map((c) => ({ id: c.id, name: c.name, color: hex(c.color) })) : undefined,
+      min: def.type === 'number' ? def.min : undefined,
+      max: def.type === 'number' ? def.max : undefined,
+      decimals: def.type === 'number' ? def.decimals : undefined,
+      rollUp: def.rollUp,
+    })),
   };
 }
 
 function round(v: number, d: number): number {
   const k = 10 ** d;
   return Math.round(v * k) / k;
+}
+
+function hex(c: [number, number, number]): string {
+  return '#' + c.map((x) => Math.round(x).toString(16).padStart(2, '0')).join('');
 }

@@ -4,12 +4,15 @@ import { useMapWorker, type LoadedMap } from './state/useMapWorker';
 import { MapView, type MapViewHandle, type Pick } from './ui/MapView';
 import { SidePanel, WorldPanel, type PanelTab } from './ui/WorldPanel';
 import { EditPanel } from './ui/EditPanel';
+import { DataPanel } from './ui/DataPanel';
+import { layerColors, layerCsv } from './model/layers';
+import { zip } from './util/zip';
 import { useEditor } from './state/useEditor';
 import { Inspector } from './ui/Inspector';
 import { Legend, ModeSwitch, Veil, ZoomLadder } from './ui/Controls';
 import { TopBar } from './ui/TopBar';
 import { LEVELS } from './ui/zoomLevels';
-import type { MapMode } from './render/mapModes';
+import { layerIdOf, type MapMode } from './render/mapModes';
 import type { Quality } from './render/MapRenderer';
 import { gzip, mapToJSON } from './model/serialize';
 import { buildGameExport } from './model/exportGame';
@@ -44,10 +47,26 @@ export function App() {
   const onEditError = useCallback((m: string) => setError(m), []);
   const editor = useEditor(loaded, setLoaded, rederive, onEditError);
   const { setSettings, undo, redo } = editor;
+  const [activeLayer, setActiveLayer] = useState<string | null>(null);
   const changeTab = (t: PanelTab) => {
     setTab(t);
-    if (t !== 'edit') setSettings((s) => ({ ...s, tool: null }));
+    if (t !== tab) setSettings((s) => ({ ...s, tool: null }));
   };
+
+  // the custom layer shown as the map mode, if any
+  const shownLayerId = layerIdOf(mode);
+  const layers = loaded?.map.layers ?? [];
+  const shownLayer = layers.find((l) => l.def.id === shownLayerId) ?? null;
+  // a layer deleted (or undone away) while shown: back to the political map
+  useEffect(() => {
+    if (shownLayerId && loaded && !shownLayer) setMode('political');
+  }, [shownLayerId, shownLayer, loaded]);
+  const shownColors = useMemo(
+    () => (loaded && shownLayer ? layerColors(loaded.map, shownLayer) : null),
+    // values change in place: the editor revision says when
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [loaded, shownLayer, editor.revision],
+  );
 
   // editing shortcuts
   useEffect(() => {
@@ -126,6 +145,14 @@ export function App() {
     const b = await viewRef.current?.snapshot();
     if (b) download(b, `${fileBase()}.png`);
   };
+  const onExportCsv = () => {
+    if (!loaded || !loaded.map.layers.length) {
+      setError('This map has no data layers yet. Add one in the Data tab.');
+      return;
+    }
+    const files = loaded.map.layers.map((l) => ({ name: `${l.def.id}.csv`, data: layerCsv(loaded.map, l) }));
+    download(new Blob([zip(files)], { type: 'application/zip' }), `${fileBase()}-layers.zip`);
+  };
 
   // test and automation hook
   useEffect(() => {
@@ -140,16 +167,44 @@ export function App() {
       generate: (p: Partial<GenParams>) => draw({ ...DEFAULT_PARAMS, ...p }),
       editor: () => editor,
       setTab: changeTab,
+      setActiveLayer,
     };
   });
 
   return (
     <div className="app">
-      <MapView ref={viewRef} editor={editor.bridge} toolActive={!!editor.settings.tool} revision={editor.revision} quality={quality} loaded={loaded} mode={mode} selected={pick} onSelect={setPick} onZoom={setZoom} />
-      <TopBar quality={quality} onQuality={changeQuality} name={loaded?.map.meta.params.seed ?? ''} hasMap={!!loaded} onOpen={onOpen} onSave={onSave} onExportData={onExportData} onExportImage={onExportImage} />
+      <MapView ref={viewRef} editor={editor.bridge} toolActive={!!editor.settings.tool} revision={editor.revision} quality={quality} loaded={loaded} mode={mode} layerColors={shownColors} badgeLayer={shownLayer?.def.showIcons ? shownLayer : null} selected={pick} onSelect={setPick} onZoom={setZoom} />
+      <TopBar quality={quality} onQuality={changeQuality} name={loaded?.map.meta.params.seed ?? ''} hasMap={!!loaded} onOpen={onOpen} onSave={onSave}
+        exports={[
+          { label: 'Game data', hint: 'Hexes, provinces, realms and layers as JSON', run: onExportData },
+          { label: 'Data layers', hint: 'One CSV table per layer, zipped', run: onExportCsv, disabled: !layers.length },
+          { label: 'Image of this view', hint: 'PNG at screen resolution', run: onExportImage },
+        ]}
+      />
       <SidePanel tab={tab} onTab={changeTab}>
         {tab === 'world' ? (
           <WorldPanel params={params} onChange={setParams} onGenerate={draw} busy={!!busy} hasEdits={editor.hasEdits} />
+        ) : tab === 'data' ? (
+          loaded && (
+            <DataPanel
+              map={loaded.map}
+              revision={editor.revision}
+              activeId={activeLayer}
+              onActive={setActiveLayer}
+              shown={!!activeLayer && shownLayerId === activeLayer}
+              onShow={(id) => setMode(id ? `layer:${id}` : 'political')}
+              settings={editor.settings}
+              onSettings={setSettings}
+              change={editor.change}
+              working={editor.working}
+              canUndo={editor.canUndo}
+              undoLabel={editor.undoLabel}
+              onUndo={undo}
+              onDownload={download}
+              onExportCsv={onExportCsv}
+              notify={setError}
+            />
+          )
         ) : (
           <EditPanel
             settings={editor.settings}
@@ -174,7 +229,7 @@ export function App() {
                 (m) => {
                   for (const e of Object.values(m.labels ?? {})) delete e.hidden;
                 },
-                'labels',
+                'instant',
               )
             }
           />
@@ -186,6 +241,7 @@ export function App() {
           pick={pick}
           onClose={() => setPick(null)}
           onChange={tab === 'edit' ? editor.change : undefined}
+          onLayerChange={tab === 'edit' || tab === 'data' ? editor.change : undefined}
           onSelectProvince={(id) => {
             const p = loaded.map.provinces[id];
             setPick({ province: id, hex: p.capitalHex });
@@ -203,8 +259,8 @@ export function App() {
             }}
             onStep={(f) => viewRef.current?.flyTo(zoom * f)}
           />
-          <ModeSwitch mode={mode} onMode={setMode} />
-          <Legend mode={mode} present={presentCodes} />
+          <ModeSwitch mode={mode} onMode={setMode} layers={layers.map((l) => ({ id: l.def.id, name: l.def.name }))} />
+          <Legend mode={mode} present={presentCodes} layer={shownLayer} />
         </>
       )}
       {busy && <Veil step={busy.step} fraction={busy.fraction} />}

@@ -25,6 +25,7 @@ const HINTS: Record<ToolId, string> = {
   region: 'Start inside a region and drag across provinces: they join that region.',
   realm: 'Start inside a realm and drag across regions: they join that realm.',
   label: 'Drag a name to move it. Click a name to resize, bend, turn or hide it.',
+  layer: 'Drag over hexes to set their value. Values set by hand stay when rules run again.',
 };
 
 const BRUSH_TOOLS: ToolId[] = ['raise', 'lower', 'smooth', 'flatten', 'paint', 'erase-river', 'lake', 'drain', 'assign', 'region', 'realm'];
@@ -194,7 +195,7 @@ function Slider(props: { label: string; value: number; min: number; max: number;
 }
 
 /** Small engraved glyphs, one per tool. */
-function ToolIcon({ tool }: { tool: ToolId }) {
+export function ToolIcon({ tool }: { tool: ToolId }) {
   const paths: Record<ToolId, string> = {
     raise: 'M2 13 L7 5 L10 9 L12 7 L16 13 Z M9 2 v3 M7.5 3.5 L9 2 L10.5 3.5',
     lower: 'M2 6 L7 12 L10 9 L12 11 L16 6 M9 13 v3 M7.5 14.5 L9 16 L10.5 14.5',
@@ -211,6 +212,7 @@ function ToolIcon({ tool }: { tool: ToolId }) {
     region: 'M2 3 H16 V15 H2 Z M2 9 H9 V15 M9 3 V9',
     realm: 'M9 1 L15 4 V10 C15 14 9 17 9 17 C9 17 3 14 3 10 V4 Z',
     label: 'M3 14 L7 4 L11 14 M4.6 10 H9.4 M12 6 H16 M12 10 H15',
+    layer: 'M2 6 L9 2 L16 6 L9 10 Z M2 9.5 L9 13.5 L16 9.5 M2 13 L9 17 L16 13',
   };
   return (
     <svg viewBox="0 0 18 18" className="tool__icon" aria-hidden>

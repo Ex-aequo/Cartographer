@@ -28,6 +28,16 @@ export function drawEditOverlay(
     else if (t === 'assign') c = map.realms[map.regions[map.provinces[s.target].region].realm].color;
     else if (t === 'region') c = map.realms[map.regions[s.target].realm].color;
     else if (t === 'realm') c = map.realms[s.target].color;
+    else if (t === 'layer') {
+      const l = map.layers.find((x) => x.def.id === settings.layer);
+      const v = settings.layerValue ?? 0;
+      if (l && Number.isNaN(v)) c = [140, 130, 120];
+      else if (l && (l.def.type === 'category' || l.def.type === 'tags')) c = l.def.categories.find((k) => k.id === v)?.color ?? c;
+      else if (l && l.def.type === 'number') {
+        const t2 = l.def.max > l.def.min ? Math.min(1, Math.max(0, (v - l.def.min) / (l.def.max - l.def.min))) : 0;
+        c = [0, 1, 2].map((q) => l.def.colorLow[q] + (l.def.colorHigh[q] - l.def.colorLow[q]) * t2);
+      }
+    }
     ctx.fillStyle = `rgba(${c[0]}, ${c[1]}, ${c[2]}, 0.55)`;
     ctx.strokeStyle = `rgba(${Math.round(c[0] * 0.5)}, ${Math.round(c[1] * 0.5)}, ${Math.round(c[2] * 0.5)}, 0.8)`;
     ctx.lineWidth = 1;

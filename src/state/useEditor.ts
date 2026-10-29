@@ -69,7 +69,7 @@ export function useEditor(loaded: LoadedMap | null, setLoaded: (l: LoadedMap) =>
         refresh();
         return;
       }
-      if (rec.kind === 'labels') {
+      if (rec.kind === 'instant') {
         session.commit(rec, cur.map);
         refresh();
         return;
@@ -83,7 +83,7 @@ export function useEditor(loaded: LoadedMap | null, setLoaded: (l: LoadedMap) =>
 
   /** One undoable change from a panel (rename, recolour, new region …). */
   const change = useCallback(
-    (label: string, mutate: (map: MapData) => void, kind?: 'labels') => {
+    (label: string, mutate: (map: MapData) => void, kind?: 'instant') => {
       const cur = loadedRef.current;
       if (!cur || workingRef.current || session.stroke) return;
       complete(session.change(cur.map, label, () => mutate(cur.map), kind));
@@ -112,7 +112,7 @@ export function useEditor(loaded: LoadedMap | null, setLoaded: (l: LoadedMap) =>
       const t = labelToken.current;
       labelToken.current = null;
       if (!cur || !t) return;
-      complete(session.finishChange(cur.map, t, label, 'labels'));
+      complete(session.finishChange(cur.map, t, label, 'instant'));
     },
     [complete, session],
   );
@@ -123,7 +123,7 @@ export function useEditor(loaded: LoadedMap | null, setLoaded: (l: LoadedMap) =>
       if (!cur || workingRef.current || session.stroke) return;
       const rec = dir === 'undo' ? session.undo(cur.map) : session.redo(cur.map);
       if (!rec) return;
-      if (rec.kind === 'labels') refresh();
+      if (rec.kind === 'instant') refresh();
       else run(() => {});
     },
     [run, session],

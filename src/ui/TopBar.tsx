@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Quality } from '../render/MapRenderer';
 
+export interface ExportItem {
+  label: string;
+  hint: string;
+  run(): void;
+  disabled?: boolean;
+}
+
 interface Props {
   quality: Quality;
   onQuality(q: Quality): void;
@@ -8,11 +15,10 @@ interface Props {
   hasMap: boolean;
   onOpen(file: File): void;
   onSave(): void;
-  onExportData(): void;
-  onExportImage(): void;
+  exports: ExportItem[];
 }
 
-export function TopBar({ quality, onQuality, name, hasMap, onOpen, onSave, onExportData, onExportImage }: Props) {
+export function TopBar({ quality, onQuality, name, hasMap, onOpen, onSave, exports }: Props) {
   const fileInput = useRef<HTMLInputElement>(null);
   const [menu, setMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -68,26 +74,20 @@ export function TopBar({ quality, onQuality, name, hasMap, onOpen, onSave, onExp
           </button>
           {menu && (
             <div className="menu__list" role="menu">
-              <button
-                role="menuitem"
-                onClick={() => {
-                  setMenu(false);
-                  onExportData();
-                }}
-              >
-                Game data
-                <small>Hexes, provinces, realms as JSON</small>
-              </button>
-              <button
-                role="menuitem"
-                onClick={() => {
-                  setMenu(false);
-                  onExportImage();
-                }}
-              >
-                Image of this view
-                <small>PNG at screen resolution</small>
-              </button>
+              {exports.map((x) => (
+                <button
+                  key={x.label}
+                  role="menuitem"
+                  disabled={x.disabled}
+                  onClick={() => {
+                    setMenu(false);
+                    x.run();
+                  }}
+                >
+                  {x.label}
+                  <small>{x.hint}</small>
+                </button>
+              ))}
             </div>
           )}
         </div>

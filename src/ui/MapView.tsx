@@ -1,3 +1,5 @@
+import type { DataLayer } from '../model/layers';
+import { drawLayerBadges } from '../render/badges';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
 import type { LoadedMap } from '../state/useMapWorker';
 import { MapRenderer, ZOOM, hexFactor, type MapMode, type Quality, type View } from '../render/MapRenderer';
@@ -44,12 +46,16 @@ interface Props {
   quality: Quality;
   loaded: LoadedMap | null;
   mode: MapMode;
+  /** colours of the custom layer shown in a layer mode */
+  layerColors: Uint8Array | null;
+  /** custom layer whose values are lettered on the map at close zoom */
+  badgeLayer: DataLayer | null;
   selected: Pick | null;
   onSelect(p: Pick | null): void;
   onZoom(zoom: number): void;
 }
 
-export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ editor, toolActive, revision, quality, loaded, mode, selected, onSelect, onZoom }, ref) {
+export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ editor, toolActive, revision, quality, loaded, mode, layerColors, badgeLayer, selected, onSelect, onZoom }, ref) {
   const wrap = useRef<HTMLDivElement>(null);
   const glCanvas = useRef<HTMLCanvasElement>(null);
   const labelCanvas = useRef<HTMLCanvasElement>(null);
@@ -59,8 +65,8 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ edito
   const size = useRef({ w: 1, h: 1 });
   const frame = useRef(0);
   const anim = useRef<{ from: View; to: View; t0: number; dur: number } | null>(null);
-  const props = useRef({ loaded, mode, selected, onZoom });
-  props.current = { loaded, mode, selected, onZoom };
+  const props = useRef({ loaded, mode, selected, onZoom, badgeLayer });
+  props.current = { loaded, mode, selected, onZoom, badgeLayer };
   const lastZoomReported = useRef(-1);
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
@@ -88,6 +94,7 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ edito
     r.render({ view: view.current, mode: props.current.mode, selectedProvince: props.current.selected?.province ?? -1, hoveredProvince: hover.current });
     const ctx = labelCanvas.current!.getContext('2d')!;
     drawnLabels.current = drawLabels(ctx, size.current.w, size.current.h, labelDpr(), view.current, l.map, l.assets, editorRef.current.settings()?.tool === 'label' ? editorRef.current.selectedLabel() : null);
+    if (props.current.badgeLayer) drawLayerBadges(ctx, size.current.w, size.current.h, labelDpr(), view.current, l.map, props.current.badgeLayer);
     const tool = editorRef.current.settings();
     if (tool) drawEditOverlay(ctx, size.current.w, size.current.h, view.current, l.map, tool, editorRef.current.session, pointerWorld.current);
     if (Math.abs(view.current.zoom - lastZoomReported.current) > 1e-3) {
@@ -200,7 +207,13 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ edito
     draw();
   }, [loaded, draw, schedule]);
 
-  useEffect(() => schedule(), [mode, selected, revision, toolActive, schedule]);
+  useEffect(() => {
+    if (!loaded || !renderer.current) return;
+    renderer.current.setLayerColors(layerColors, loaded.map.grid.cols, loaded.map.grid.rows);
+    schedule();
+  }, [layerColors, loaded, schedule]);
+
+  useEffect(() => schedule(), [mode, selected, revision, toolActive, badgeLayer, schedule]);
 
   useEffect(() => {
     const r = renderer.current;

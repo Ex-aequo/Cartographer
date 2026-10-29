@@ -22,7 +22,7 @@ function stroke(s: EditSession, m: MapData, t: ToolSettings, pts: [number, numbe
   for (const p of pts.slice(1)) s.move(p[0], p[1]);
   const rec = s.end();
   if (!rec) return m;
-  if (rec.kind === 'labels') {
+  if (rec.kind === 'instant') {
     s.commit(rec, m);
     return m;
   }
@@ -178,7 +178,7 @@ describe('border tools', () => {
   });
 });
 
-describe('labels', () => {
+describe('instant', () => {
   test('moving a label is one undo step and needs no rebuild', () => {
     const m = fresh();
     const a = buildRenderAssets(m);

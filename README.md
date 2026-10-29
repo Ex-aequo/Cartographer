@@ -54,11 +54,30 @@ Requires Node 20 or newer and a browser with WebGL 2.
     province its own region, or make a region an independent realm.
   - Undo and redo cover every change, 100 steps deep. Edits are saved in the
     `.cartomap` file and marked in the game-data export.
+- **Data** (left panel, third tab): custom game layers.
+  - *New layer*: a category (one of a list, e.g. a resource), a number (e.g.
+    fertility), yes/no, or a list of tags; one value per hex or per province.
+    Leave the name empty for a worked example.
+  - *Rules* fill a layer from the land: conditions on terrain, biome,
+    elevation, temperature, rainfall, coast, river, lake and distance from a
+    town, a chance, and a value or a formula (e.g. fertility = rainfall × 10 on
+    plains and farmland). Results are seeded, so the same map gives the same
+    values. Rules can run again after every land edit.
+  - Province layers can be filled from a hex layer instead: total, average,
+    highest, lowest, most common, or "any hex has it".
+  - *Paint by hand* sets values with a brush; painted values stay when rules
+    run again, and *Let rules decide* gives them back.
+  - The eye shows a layer as a map mode (also in the mode bar at the bottom),
+    with a legend, and letters the values on the map when zoomed in.
+  - *Save template* / *Load template* move layer definitions and rules between
+    maps. *CSV tables* downloads one table per layer.
 - **Inspector**: click any province to see its realm, region, terrain,
-  neighbours, and the data of the hex under the cursor.
+  neighbours, the data of the hex under the cursor, and its custom layer
+  values (editable while the Edit or Data tab is open).
 - **Save / Open**: `.cartomap` project files (gzip JSON) keep the full world.
 - **Export → Game data**: hexes, provinces, regions, realms and rivers as JSON
   (see [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md)).
+- **Export → Data layers**: one CSV per custom layer, zipped.
 - **Export → Image of this view**: PNG of the current view, labels included.
 
 Keyboard: arrow keys pan, + and − zoom, Escape puts the tool down or clears the
@@ -89,9 +108,10 @@ clicks always land on the province you see.
    quality setting.
 3. **Phase 3**: editing, in four steps.
    - **3a (done)**: edit panel, undo and redo, land and water tools.
-   - **3b (this release)**: border and naming tools (reassign hexes, split and
+   - **3b (done)**: border and naming tools (reassign hexes, split and
      merge provinces, regions and realms, names, titles, colours, labels).
-   - 3c: custom data layers with auto-fill rules and templates.
+   - **3c (this release)**: custom data layers with auto-fill rules,
+     painting, province roll-ups, templates and CSV export.
    - 3d: your own SVG and PNG assets.
 4. **Phase 4**: full export set (tiled high-resolution images, province ID
    image, heightmap and masks, CSV) and a desktop build.

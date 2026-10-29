@@ -6,6 +6,7 @@ import { generateMoisture } from './climate';
 import { buildHexes } from './hydrology';
 import { computeAdjacency, provinceFacts } from './political';
 import { makeCulture, NameForge } from './names';
+import { refreshLayers } from '../model/layers';
 
 /** Edit layers for a map, created empty the first time someone edits it. */
 export function ensureEdits(map: MapData): EditLayers {
@@ -33,7 +34,9 @@ export function rederive(map: MapData): MapData {
   const moisture = generateMoisture(p, map.height, map.baseTemp, map.world.width, map.world.height, rng);
   const { hex, nbr, rivers } = buildHexes(p, grid, map.height, map.baseTemp, moisture, rng, { autoLakes: false, edits: map.edits });
   const pol = repairPolitical(map, hex, nbr, rivers);
-  return { ...map, moisture, hex, rivers, ...pol };
+  const out: MapData = { ...map, moisture, hex, rivers, ...pol };
+  refreshLayers(out);
+  return out;
 }
 
 function repairPolitical(old: MapData, hex: HexLayers, nbr: Int32Array, rivers: River[]) {

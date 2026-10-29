@@ -62,6 +62,8 @@ export function mapFromJSON(text: string): MapData {
     for (let i = 0; i < qd.length; i++) out[i] = qd[i] / h.quantized;
     map.height = { w: h.w, h: h.h, res: h.res, data: out };
   }
+  // custom data layers (format 3); older files have none
+  map.layers = Array.isArray(map.layers) ? map.layers.filter((l) => l && l.def && l.values instanceof Float32Array && l.locked instanceof Uint8Array) : [];
   map.version = FORMAT_VERSION;
   return map;
 }

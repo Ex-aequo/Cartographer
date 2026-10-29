@@ -103,6 +103,7 @@ export class MapRenderer {
         tPaint: { value: null },
         uFarmSpan: { value: new THREE.Vector2(1, 1) },
         tHexData: { value: null },
+        tHexLayer: { value: null },
         tWarp: { value: null },
         uWarpSize: { value: new THREE.Vector2(1, 1) },
         uSigma2: { value: BORDER_SIGMA2 },
@@ -255,6 +256,23 @@ export class MapRenderer {
   /** The heightfield was edited in place: upload it again before the next frame. */
   heightChanged(): void {
     if (this.heightTex) this.heightTex.needsUpdate = true;
+  }
+
+  private layerTex: THREE.DataTexture | null = null;
+
+  /** Colours of the custom layer shown in a `layer:` mode (RGBA8 per hex). */
+  setLayerColors(colors: Uint8Array | null, cols: number, rows: number): void {
+    const u = this.mapMat.uniforms;
+    const data = colors ?? new Uint8Array(cols * rows * 4);
+    if (!this.layerTex || this.layerTex.image.width !== cols || this.layerTex.image.height !== rows) {
+      this.layerTex?.dispose();
+      this.layerTex = new THREE.DataTexture(data, cols, rows, THREE.RGBAFormat, THREE.UnsignedByteType);
+      this.layerTex.minFilter = this.layerTex.magFilter = THREE.NearestFilter;
+    } else {
+      (this.layerTex.image.data as Uint8Array).set(data);
+    }
+    this.layerTex.needsUpdate = true;
+    u.tHexLayer.value = this.layerTex;
   }
 
   private applyMode(m: MapMode): void {
