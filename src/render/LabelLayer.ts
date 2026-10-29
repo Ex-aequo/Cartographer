@@ -1,4 +1,4 @@
-import type { MapData } from '../model/types';
+import type { LabelEdit, MapData } from '../model/types';
 import type { CurveLabel, RenderAssets } from './assets';
 import type { View } from './MapRenderer';
 import { hexCenterX, hexCenterY } from '../model/hex';
@@ -12,7 +12,54 @@ const fade = (z: number, a: number, b: number) => Math.min(1, Math.max(0, (z - a
  * Map lettering and settlement marks, drawn with Canvas 2D on top of the
  * WebGL map. Kept in a canvas (not SVG) so exports can flatten both layers.
  */
-export function drawLabels(ctx: CanvasRenderingContext2D, cssW: number, cssH: number, dpr: number, view: View, map: MapData, a: RenderAssets): void {
+export interface DrawnLabel {
+  key: string;
+  /** screen box [x0, y0, x1, y1], CSS px */
+  box: number[];
+}
+
+/** A curved label with its hand adjustments applied, and the current name. */
+export function adjustedCurve(l: CurveLabel, e: LabelEdit | undefined, text: string): CurveLabel {
+  if (!e) return { ...l, text };
+  const cx = (l.p0[0] + l.p2[0]) / 2;
+  const cy = (l.p0[1] + l.p2[1]) / 2;
+  const a = e.angle ?? 0;
+  const ca = Math.cos(a);
+  const sa = Math.sin(a);
+  const tf = (p: [number, number]): [number, number] => {
+    const x = p[0] - cx;
+    const y = p[1] - cy;
+    return [cx + x * ca - y * sa + (e.dx ?? 0), cy + x * sa + y * ca + (e.dy ?? 0)];
+  };
+  const p0 = tf(l.p0);
+  const p2 = tf(l.p2);
+  let p1 = tf(l.p1);
+  if (e.bend) {
+    const len = Math.hypot(p2[0] - p0[0], p2[1] - p0[1]) || 1;
+    // perpendicular, pointing "up" on screen for a positive bend
+    let nx = -(p2[1] - p0[1]) / len;
+    let ny = (p2[0] - p0[0]) / len;
+    if (ny > 0) {
+      nx = -nx;
+      ny = -ny;
+    }
+    p1 = [p1[0] + nx * e.bend * len, p1[1] + ny * e.bend * len];
+  }
+  return { ...l, p0, p1, p2, size: l.size * (e.scale ?? 1), text };
+}
+
+export function drawLabels(
+  ctx: CanvasRenderingContext2D,
+  cssW: number,
+  cssH: number,
+  dpr: number,
+  view: View,
+  map: MapData,
+  a: RenderAssets,
+  selectedLabel: string | null = null,
+): DrawnLabel[] {
+  const drawn: DrawnLabel[] = [];
+  const edits = map.labels ?? {};
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -27,19 +74,32 @@ export function drawLabels(ctx: CanvasRenderingContext2D, cssW: number, cssH: nu
   // ---- realm names: large, curved, letter-spaced (world zooms)
   const realmAlpha = 1 - fade(z, 6, 8.5);
   if (realmAlpha > 0.01) {
-    for (const l of a.realmLabels) {
-      const box = drawCurved(ctx, l, toScreen, z, realmAlpha, onScreen, REALM_STYLE);
+    for (const l0 of a.realmLabels) {
+      const key = `realm:${l0.id}`;
+      const e = edits[key];
+      if (e?.hidden || map.realms[l0.id]?.retired) continue;
+      const box = drawCurved(ctx, adjustedCurve(l0, e, map.realms[l0.id]?.name ?? l0.text), toScreen, z, realmAlpha, onScreen, REALM_STYLE);
       // while realm names are still legible, region names keep clear of them
-      if (box && realmAlpha > 0.25) boxes.push(box);
+      if (box && realmAlpha > 0.25) {
+        boxes.push(box);
+        drawn.push({ key, box });
+      }
     }
   }
 
   // ---- region (duchy) names: realm zoom
   const regionAlpha = fade(z, 7, 9) * (1 - fade(z, 15, 19));
   if (regionAlpha > 0.01) {
-    for (const l of a.regionLabels) {
-      const box = drawCurved(ctx, l, toScreen, z, regionAlpha, onScreen, REGION_STYLE, hits);
-      if (box) boxes.push(box);
+    for (const l0 of a.regionLabels) {
+      const key = `region:${l0.id}`;
+      const e = edits[key];
+      if (e?.hidden || map.regions[l0.id]?.retired) continue;
+      // a label placed by hand stays where it was put, collisions or not
+      const box = drawCurved(ctx, adjustedCurve(l0, e, map.regions[l0.id]?.name ?? l0.text), toScreen, z, regionAlpha, onScreen, REGION_STYLE, e ? undefined : hits);
+      if (box) {
+        boxes.push(box);
+        if (regionAlpha > 0.25) drawn.push({ key, box });
+      }
     }
   }
 
@@ -71,23 +131,30 @@ export function drawLabels(ctx: CanvasRenderingContext2D, cssW: number, cssH: nu
     ctx.textBaseline = 'middle';
     ctx.lineJoin = 'round';
     for (const l of a.provinceLabels) {
-      const [lx, ly] = toScreen(l.x, l.y);
+      const key = `province:${l.id}`;
+      const e = edits[key];
+      const prov = map.provinces[l.id];
+      if (e?.hidden || !prov || prov.retired) continue;
+      const text = prov.name;
+      const [lx, ly] = toScreen(l.x + (e?.dx ?? 0), l.y + (e?.dy ?? 0));
       if (!onScreen(lx, ly, 120)) continue;
-      const px = Math.min(22, Math.max(10, l.size * z * 0.62));
+      const px = Math.min(22 * (e?.scale ?? 1), Math.max(10, l.size * z * 0.62 * (e?.scale ?? 1)));
       ctx.font = `italic ${px}px ${NAME_FONT}`;
-      const w = ctx.measureText(l.text).width;
-      const radius = Math.sqrt(map.provinces[l.id].hexes.length * 0.83) * z;
-      if (w > radius * 2.4) continue; // not enough room: leave it for the next zoom step
-      // try the open middle of the province first, then beside its own settlement
+      const w = ctx.measureText(text).width;
+      const radius = Math.sqrt(prov.hexes.length * 0.83) * z;
+      if (!e && w > radius * 2.4) continue; // not enough room: leave it for the next zoom step
+      // a hand-placed name goes exactly where it was put; otherwise try the
+      // open middle of the province first, then beside its own settlement
       const cands: [number, number][] = [[lx, ly]];
       const ic = iconAt[l.id];
-      if (ic) cands.push([ic[0], ic[1] + ic[2] + px * 0.7], [ic[0], ic[1] - ic[2] * 2 - px * 0.6]);
+      if (ic && !e) cands.push([ic[0], ic[1] + ic[2] + px * 0.7], [ic[0], ic[1] - ic[2] * 2 - px * 0.6]);
       let placed: [number, number] | null = null;
       for (const [cx, cy] of cands) {
         const box = [cx - w / 2 - 2, cy - px * 0.55, cx + w / 2 + 2, cy + px * 0.55];
-        if (!hits(box)) {
+        if (e || !hits(box)) {
           placed = [cx, cy];
           boxes.push(box);
+          drawn.push({ key, box });
           break;
         }
       }
@@ -95,12 +162,37 @@ export function drawLabels(ctx: CanvasRenderingContext2D, cssW: number, cssH: nu
       ctx.globalAlpha = provAlpha;
       ctx.lineWidth = Math.max(2.5, px * 0.22);
       ctx.strokeStyle = 'rgba(28, 20, 12, 0.72)';
-      ctx.strokeText(l.text, placed[0], placed[1]);
+      ctx.strokeText(text, placed[0], placed[1]);
       ctx.fillStyle = '#f1e6c8';
-      ctx.fillText(l.text, placed[0], placed[1]);
+      ctx.fillText(text, placed[0], placed[1]);
     }
     ctx.globalAlpha = 1;
   }
+
+  // the label being adjusted
+  const sel = selectedLabel ? drawn.find((d) => d.key === selectedLabel) : null;
+  if (sel) {
+    const [x0, y0, x1, y1] = sel.box;
+    ctx.setLineDash([5, 4]);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(240, 230, 205, 0.95)';
+    ctx.strokeRect(x0 - 3, y0 - 3, x1 - x0 + 6, y1 - y0 + 6);
+    ctx.strokeStyle = 'rgba(30, 20, 12, 0.8)';
+    ctx.lineDashOffset = 4;
+    ctx.strokeRect(x0 - 3, y0 - 3, x1 - x0 + 6, y1 - y0 + 6);
+    ctx.setLineDash([]);
+    ctx.lineDashOffset = 0;
+  }
+  return drawn;
+}
+
+/** The topmost drawn label under a screen point. */
+export function labelAt(drawn: DrawnLabel[], x: number, y: number): string | null {
+  for (let k = drawn.length - 1; k >= 0; k--) {
+    const [x0, y0, x1, y1] = drawn[k].box;
+    if (x >= x0 && x <= x1 && y >= y0 && y <= y1) return drawn[k].key;
+  }
+  return null;
 }
 
 interface CurveStyle {

@@ -239,7 +239,7 @@ function repairPolitical(old: MapData, hex: HexLayers, nbr: Int32Array, rivers: 
 }
 
 /** A name in a culture's style for something made by an edit. Deterministic per id. */
-function nameFor(map: MapData, seed: string, id: number, culture: number): string {
+export function nameFor(map: MapData, seed: string, id: number, culture: number): string {
   const palette = map.cultures[culture]?.palette ?? culture;
   const style = makeCulture(new Rng(`${seed}:culture:${culture}`), palette);
   return new NameForge(new Rng(`${seed}:edit-name:${id}`)).word(style, 1, 2);

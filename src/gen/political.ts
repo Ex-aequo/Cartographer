@@ -588,7 +588,7 @@ function centroidOf(pts: [number, number][]): [number, number] {
 }
 
 /** Heraldic palette: muted, distinct, readable over parchment and terrain. */
-const PALETTE: [number, number, number][] = [
+export const PALETTE: [number, number, number][] = [
   [150, 42, 38], [40, 74, 140], [196, 156, 44], [52, 112, 58], [104, 60, 138], [196, 104, 44],
   [36, 122, 124], [124, 92, 56], [176, 70, 108], [86, 102, 36], [88, 128, 182], [118, 44, 88],
   [210, 178, 96], [60, 108, 90], [160, 64, 44], [84, 72, 140], [160, 152, 60], [44, 90, 60],

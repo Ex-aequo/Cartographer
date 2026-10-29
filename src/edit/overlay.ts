@@ -21,8 +21,13 @@ export function drawEditOverlay(
   const s = session.stroke;
 
   // hexes painted or erased in this stroke (they update for real when the stroke ends)
-  if (s && s.hexes.size && (settings.tool === 'paint' || settings.tool === 'erase-river')) {
-    const c = settings.tool === 'paint' ? TERRAIN_COLORS[settings.terrain] : [196, 74, 60];
+  if (s && s.hexes.size) {
+    const t = settings.tool;
+    let c: number[] = [196, 74, 60];
+    if (t === 'paint') c = TERRAIN_COLORS[settings.terrain];
+    else if (t === 'assign') c = map.realms[map.regions[map.provinces[s.target].region].realm].color;
+    else if (t === 'region') c = map.realms[map.regions[s.target].realm].color;
+    else if (t === 'realm') c = map.realms[s.target].color;
     ctx.fillStyle = `rgba(${c[0]}, ${c[1]}, ${c[2]}, 0.55)`;
     ctx.strokeStyle = `rgba(${Math.round(c[0] * 0.5)}, ${Math.round(c[1] * 0.5)}, ${Math.round(c[2] * 0.5)}, 0.8)`;
     ctx.lineWidth = 1;
@@ -45,7 +50,8 @@ export function drawEditOverlay(
   }
 
   // the river being drawn
-  if (s && settings.tool === 'river' && s.points.length > 1) {
+  if (s && (settings.tool === 'river' || settings.tool === 'split' || settings.tool === 'merge') && s.points.length > 1) {
+    const ink = settings.tool === 'river' ? 'rgba(52, 104, 128, 0.95)' : settings.tool === 'split' ? 'rgba(150, 40, 32, 0.95)' : 'rgba(40, 30, 20, 0.95)';
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.strokeStyle = 'rgba(236, 226, 201, 0.85)';
@@ -53,15 +59,24 @@ export function drawEditOverlay(
     ctx.beginPath();
     s.points.forEach(([x, y], k) => (k ? ctx.lineTo(sx(x), sy(y)) : ctx.moveTo(sx(x), sy(y))));
     ctx.stroke();
-    ctx.strokeStyle = 'rgba(52, 104, 128, 0.95)';
+    ctx.strokeStyle = ink;
     ctx.lineWidth = 2.5;
+    if (settings.tool === 'split') ctx.setLineDash([8, 5]);
     ctx.stroke();
+    ctx.setLineDash([]);
+    if (settings.tool === 'merge') {
+      // a dot where the drag started: the province that stays
+      ctx.fillStyle = ink;
+      ctx.beginPath();
+      ctx.arc(sx(s.points[0][0]), sy(s.points[0][1]), 5, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   // brush outline
-  if (pointer) {
+  if (pointer && settings.tool !== 'label') {
     const [px, py] = pointer;
-    const r = settings.tool === 'river' ? 0 : settings.radius * z;
+    const r = settings.tool === 'river' || settings.tool === 'split' || settings.tool === 'merge' ? 0 : settings.radius * z;
     ctx.lineWidth = 1.5;
     if (r > 2) {
       ctx.strokeStyle = 'rgba(20, 14, 9, 0.75)';

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { Terrain, type MapData } from '../model/types';
-import { EditSession, type ToolSettings } from '../edit/session';
+import { Terrain, type LabelEdit, type MapData } from '../model/types';
+import { EditSession, type ChangeToken, type StepRecord, type ToolSettings } from '../edit/session';
 import type { RenderAssets } from '../render/assets';
 import type { LoadedMap } from './useMapWorker';
 import type { EditBridge } from '../ui/MapView';
@@ -9,16 +9,20 @@ type Rebuild = (map: MapData, reuse: RenderAssets) => Promise<LoadedMap>;
 
 /**
  * Owns the edit session: tool settings, the undo history, and the rebuild
- * that follows every stroke, undo and redo. One rebuild runs at a time;
- * strokes wait for it.
+ * that follows every stroke, change, undo and redo. One rebuild runs at a
+ * time; strokes wait for it. Label placement needs no rebuild and is instant.
  */
-export function useEditor(loaded: LoadedMap | null, setLoaded: (l: LoadedMap) => void, rebuild: Rebuild, onError: (msg: string) => void) {
+export function useEditor(loaded: LoadedMap | null, setLoaded: (l: LoadedMap) => void, rebuild: Rebuild, notify: (msg: string) => void) {
   const session = useRef(new EditSession()).current;
   const [settings, setSettings] = useState<ToolSettings>({ tool: null, radius: 4, strength: 0.6, terrain: Terrain.Forest });
   const [working, setWorking] = useState(false);
-  const [, refresh] = useReducer((x: number) => x + 1, 0);
+  const [selectedLabel, setSelectedLabel] = useState<string | null>(null);
+  /** bumps whenever the map changed without a rebuild (labels), so the view redraws */
+  const [revision, refresh] = useReducer((x: number) => x + 1, 0);
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
+  const selectedRef = useRef(selectedLabel);
+  selectedRef.current = selectedLabel;
   const workingRef = useRef(false);
   const loadedRef = useRef(loaded);
   loadedRef.current = loaded;
@@ -27,6 +31,7 @@ export function useEditor(loaded: LoadedMap | null, setLoaded: (l: LoadedMap) =>
   useEffect(() => {
     if (loaded?.fresh) {
       session.reset();
+      setSelectedLabel(null);
       refresh();
     }
   }, [loaded, session]);
@@ -42,36 +47,89 @@ export function useEditor(loaded: LoadedMap | null, setLoaded: (l: LoadedMap) =>
         after(l);
         setLoaded(l);
       } catch (e) {
-        onError(`The map could not be updated: ${(e as Error).message}`);
+        notify(`The map could not be updated: ${(e as Error).message}`);
       } finally {
         workingRef.current = false;
         setWorking(false);
         refresh();
       }
     },
-    [rebuild, setLoaded, onError],
+    [rebuild, setLoaded, notify],
   );
 
-  const finish = useCallback(() => {
-    const rec = session.end();
-    if (!rec) {
+  /** Puts a finished step on the history, rebuilding first unless it only moved labels. */
+  const complete = useCallback(
+    (rec: StepRecord | null) => {
+      if (session.message) {
+        notify(session.message);
+        session.message = null;
+      }
+      const cur = loadedRef.current;
+      if (!rec || !cur) {
+        refresh();
+        return;
+      }
+      if (rec.kind === 'labels') {
+        session.commit(rec, cur.map);
+        refresh();
+        return;
+      }
+      run((l) => session.commit(rec, l.map));
+    },
+    [run, session, notify],
+  );
+
+  const finish = useCallback(() => complete(session.end()), [complete, session]);
+
+  /** One undoable change from a panel (rename, recolour, new region …). */
+  const change = useCallback(
+    (label: string, mutate: (map: MapData) => void, kind?: 'labels') => {
+      const cur = loadedRef.current;
+      if (!cur || workingRef.current || session.stroke) return;
+      complete(session.change(cur.map, label, () => mutate(cur.map), kind));
+    },
+    [complete, session],
+  );
+
+  // live label adjustments (sliders): change the map now, record once at the end
+  const labelToken = useRef<ChangeToken | null>(null);
+  const adjustLabel = useCallback(
+    (patch: Partial<LabelEdit> | null) => {
+      const cur = loadedRef.current;
+      const key = selectedRef.current;
+      if (!cur || !key) return;
+      if (!labelToken.current) labelToken.current = session.startChange(cur.map);
+      const labels = (cur.map.labels ??= {});
+      if (patch === null) delete labels[key];
+      else labels[key] = { ...(labels[key] ?? {}), ...patch };
       refresh();
-      return;
-    }
-    run((l) => session.commit(rec, l.map));
-  }, [run, session]);
+    },
+    [session],
+  );
+  const endAdjustLabel = useCallback(
+    (label: string) => {
+      const cur = loadedRef.current;
+      const t = labelToken.current;
+      labelToken.current = null;
+      if (!cur || !t) return;
+      complete(session.finishChange(cur.map, t, label, 'labels'));
+    },
+    [complete, session],
+  );
 
-  const undo = useCallback(() => {
-    const cur = loadedRef.current;
-    if (!cur || workingRef.current || session.stroke) return;
-    if (session.undo(cur.map)) run(() => {});
-  }, [run, session]);
-
-  const redo = useCallback(() => {
-    const cur = loadedRef.current;
-    if (!cur || workingRef.current || session.stroke) return;
-    if (session.redo(cur.map)) run(() => {});
-  }, [run, session]);
+  const replay = useCallback(
+    (dir: 'undo' | 'redo') => {
+      const cur = loadedRef.current;
+      if (!cur || workingRef.current || session.stroke) return;
+      const rec = dir === 'undo' ? session.undo(cur.map) : session.redo(cur.map);
+      if (!rec) return;
+      if (rec.kind === 'labels') refresh();
+      else run(() => {});
+    },
+    [run, session],
+  );
+  const undo = useCallback(() => replay('undo'), [replay]);
+  const redo = useCallback(() => replay('redo'), [replay]);
 
   const bridge: EditBridge = useMemo(
     () => ({
@@ -79,6 +137,8 @@ export function useEditor(loaded: LoadedMap | null, setLoaded: (l: LoadedMap) =>
       session,
       ready: () => !workingRef.current,
       finish,
+      selectedLabel: () => selectedRef.current,
+      selectLabel: (k: string | null) => setSelectedLabel(k),
     }),
     [session, finish],
   );
@@ -98,6 +158,12 @@ export function useEditor(loaded: LoadedMap | null, setLoaded: (l: LoadedMap) =>
     bridge,
     undo,
     redo,
+    change,
+    adjustLabel,
+    endAdjustLabel,
+    selectedLabel,
+    setSelectedLabel,
+    revision,
     canUndo: session.canUndo,
     canRedo: session.canRedo,
     undoLabel: session.undoStack[session.undoStack.length - 1]?.label,
