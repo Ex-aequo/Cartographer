@@ -475,14 +475,27 @@ function buildRiverMesh(map: MapData): RiverMesh {
     }
     return j;
   };
+  // strongest upstream feeder of each hex: lets a river emerge from a thin
+  // spring instead of starting at full width
+  const up = new Int32Array(hex.flowTo.length).fill(-1);
+  for (let i = 0; i < hex.flowTo.length; i++) {
+    const t = hex.flowTo[i];
+    if (t >= 0 && (up[t] < 0 || hex.flux[i] > hex.flux[up[t]])) up[t] = i;
+  }
+  const smoothedAt = new Map<number, [number, number]>();
   for (const r of map.rivers) {
-    let pts: [number, number, number][] = r.hexes.map((h, k) => {
+    const path = r.hexes.slice();
+    for (let k = 0; k < 2 && up[path[0]] >= 0; k++) path.unshift(up[path[0]]);
+    const springs = path.length - r.hexes.length;
+    let pts: [number, number, number][] = path.map((h, k) => {
       const [x, y] = hexXY(map, h);
-      const last = k === r.hexes.length - 1;
+      const last = k === path.length - 1;
       const [jx, jy] = last ? [0, 0] : jitterOf(h);
-      const f = hex.flags[h] & HexFlag.Land ? hex.flux[h] : hex.flux[r.hexes[Math.max(0, k - 1)]];
-      const w = Math.min(0.5, 0.07 + 0.075 * Math.log2(f / thr + 1));
-      return [x + jx, y + jy, k === 0 ? w * 0.4 : w];
+      const f = hex.flags[h] & HexFlag.Land ? hex.flux[h] : hex.flux[path[Math.max(0, k - 1)]];
+      let w = Math.min(0.5, 0.07 + 0.075 * Math.log2(f / thr + 1));
+      if (k < springs) w = 0.02 + 0.03 * k;
+      else if (k === springs) w *= 0.6;
+      return [x + jx, y + jy, w];
     });
     // mouth: stop just past the coast instead of the middle of the water hex
     const n0 = pts.length;
@@ -492,6 +505,25 @@ function buildRiverMesh(map: MapData): RiverMesh {
       pts[n0 - 1] = [a[0] + (b[0] - a[0]) * 0.75, a[1] + (b[1] - a[1]) * 0.75, b[2] * 1.15];
     }
     for (let it = 0; it < 3; it++) pts = chaikin(pts);
+    // tributaries end exactly on the smoothed course of the river they join
+    const end = r.hexes[r.hexes.length - 1];
+    const joined = smoothedAt.get(end);
+    if (joined && hex.flags[end] & HexFlag.Land) pts[pts.length - 1] = [joined[0], joined[1], pts[pts.length - 1][2]];
+    // remember where this river's smoothed line passes each of its hexes
+    for (const h of r.hexes) {
+      if (smoothedAt.has(h)) continue;
+      const [hx, hy] = hexXY(map, h);
+      let best = pts[0];
+      let bd = Infinity;
+      for (const q of pts) {
+        const d = (q[0] - hx) ** 2 + (q[1] - hy) ** 2;
+        if (d < bd) {
+          bd = d;
+          best = q;
+        }
+      }
+      smoothedAt.set(h, [best[0], best[1]]);
+    }
     const base = pos.length / 2;
     for (let k = 0; k < pts.length; k++) {
       const p = pts[Math.max(0, k - 1)];

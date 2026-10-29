@@ -276,7 +276,7 @@ function carveLakes(f: Field, centers: [number, number][], rng: Rng): void {
   const Lw = new Float32Array(n); // tight kernel: the water body
   const Lb = new Float32Array(n); // wide kernel: the valley floor around it
   const touched = new Uint8Array(n);
-  const R = 3.2;
+  const R = 4.2;
   for (const [cx, cy] of centers) {
     const i0 = Math.max(0, Math.floor((cx - R) * f.res));
     const i1 = Math.min(f.w - 1, Math.ceil((cx + R) * f.res));
@@ -289,7 +289,7 @@ function carveLakes(f: Field, centers: [number, number][], rng: Rng): void {
         const d2 = (x - cx) ** 2 + (y - cy) ** 2;
         const k = j * f.w + i;
         Lw[k] += Math.exp(-d2 / 0.65);
-        Lb[k] += Math.exp(-d2 / 2.4);
+        Lb[k] += Math.exp(-d2 / 4.2);
         touched[k] = 1;
       }
   }
@@ -301,7 +301,7 @@ function carveLakes(f: Field, centers: [number, number][], rng: Rng): void {
     const lw = Lw[k] * wobble;
     const h = f.data[k];
     // lower the surroundings into a basin so the lake does not sit in a pit
-    const floorK = Math.pow(smoothstep(0.03, 0.75, Lb[k]), 0.7);
+    const floorK = smoothstep(0.02, 0.9, Lb[k]);
     let out = h > 0.03 ? h + (0.03 - h) * floorK : h;
     if (lw > 0.2) {
       // flat-bottomed water body; shallow so the surface reads as one sheet

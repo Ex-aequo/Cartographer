@@ -110,10 +110,11 @@ float fbmLod(vec2 p, float baseFreq, int octaves) {
 
 // ------------------------------------------------------------ sampling ---
 // Cubic B-spline filtering from four bilinear taps (Sigg & Hadwiger):
-// iso-lines such as coasts come out round instead of texel-diamond shaped.
-float baseHeight(vec2 p) {
-  vec2 size = vec2(textureSize(tHeight, 0));
-  vec2 coord = p / uHeightSpan * size - 0.5;
+// iso-lines such as coasts and biome edges come out round instead of
+// texel-diamond shaped.
+vec4 textureBSpline(sampler2D tex, vec2 uv) {
+  vec2 size = vec2(textureSize(tex, 0));
+  vec2 coord = uv * size - 0.5;
   vec2 i = floor(coord);
   vec2 f = coord - i;
   vec2 f2 = f * f;
@@ -126,14 +127,17 @@ float baseHeight(vec2 p) {
   vec2 g1 = w2 + w3;
   vec2 h0 = (w1 / g0) - 0.5 + i;
   vec2 h1 = (w3 / g1) + 1.5 + i;
-  float t00 = texture(tHeight, (vec2(h0.x, h0.y) + 0.5) / size).r;
-  float t10 = texture(tHeight, (vec2(h1.x, h0.y) + 0.5) / size).r;
-  float t01 = texture(tHeight, (vec2(h0.x, h1.y) + 0.5) / size).r;
-  float t11 = texture(tHeight, (vec2(h1.x, h1.y) + 0.5) / size).r;
-  return mix(mix(t01, t11, g1.x / (g0.x + g1.x)), mix(t00, t10, g1.x / (g0.x + g1.x)), g0.y / (g0.y + g1.y));
+  vec4 t00 = texture(tex, (vec2(h0.x, h0.y) + 0.5) / size);
+  vec4 t10 = texture(tex, (vec2(h1.x, h0.y) + 0.5) / size);
+  vec4 t01 = texture(tex, (vec2(h0.x, h1.y) + 0.5) / size);
+  vec4 t11 = texture(tex, (vec2(h1.x, h1.y) + 0.5) / size);
+  float sx = g1.x / (g0.x + g1.x);
+  float sy = g0.y / (g0.y + g1.y);
+  return mix(mix(t01, t11, sx), mix(t00, t10, sx), sy);
 }
 
-// Fine relief added on top of the generated heightfield; more in mountains.
+float baseHeight(vec2 p) { return textureBSpline(tHeight, p / uHeightSpan).r; }
+
 float detailHeight(vec2 p, float h) {
   float mtn = smoothstep(0.12, 0.6, h);
   float d = 0.0;
@@ -280,7 +284,8 @@ vec3 terrainLook(vec2 p, float h, vec3 N, float tempC, float moist, float coastD
     c += vec3(0.85, 0.82, 0.7) * spec * 0.08;
     c *= 0.94 + 0.08 * wv;
     // surf along the shore
-    float shore = 1.0 - smoothstep(0.0, 0.16 + 0.06 * snoise(p * 3.0), coastDist);
+    // (from depth, not the coast-distance texture, so it stays smooth up close)
+    float shore = 1.0 - smoothstep(0.0, 0.012 + 0.006 * snoise(p * 3.0), depth);
     c = mix(c, vec3(0.62, 0.72, 0.70), shore * 0.35);
     return c;
   }
@@ -296,7 +301,7 @@ vec3 terrainLook(vec2 p, float h, vec3 N, float tempC, float moist, float coastD
   c *= 0.96 + 0.1 * grain;
 
   // beaches on warm coasts
-  float beach = (1.0 - smoothstep(0.003, 0.016, h)) * smoothstep(4.0, 14.0, tempC) * (1.0 - b.forest * 0.6);
+  float beach = (1.0 - smoothstep(0.002, 0.009, h)) * smoothstep(8.0, 16.0, tempC) * (1.0 - b.forest * 0.6) * (1.0 - smoothstep(0.08, 0.2, 1.0 - N.z));
   c = mix(c, vec3(0.82, 0.74, 0.56), beach * 0.75);
 
   // rock on steep slopes and high ground
@@ -322,7 +327,7 @@ vec3 terrainLook(vec2 p, float h, vec3 N, float tempC, float moist, float coastD
     float sh = canopyShadow(p, fd, CELL);
     vec3 under = mix(c, treeBase * 0.5, 0.6);
     vec3 ground = mix(c, under, fd);
-    ground *= 1.0 - sh * 0.45;
+    ground *= 1.0 - sh * 0.3;
     vec3 near = mix(ground, tc.rgb, tc.a);
     c = mix(c, near, detailVis);
   }
@@ -340,7 +345,7 @@ vec3 terrainLook(vec2 p, float h, vec3 N, float tempC, float moist, float coastD
   // cool shadows, warm light (painterly)
   c = mix(c, c * vec3(0.86, 0.92, 1.08), (1.0 - clamp(lit, 0.0, 1.0)) * 0.6);
   // darker wet edge right at the waterline
-  c *= 1.0 - (1.0 - smoothstep(0.0, 0.006, h)) * 0.18;
+  c *= 1.0 - (1.0 - smoothstep(0.0, 0.005, h)) * 0.1;
   return c;
 }
 
@@ -417,9 +422,9 @@ vec3 paperLook(vec2 p, float h, vec3 N, float tempC, float moist, float coastDis
     float f = sf0 * (k == 0 ? 1.0 : 2.0);
     vec2 g = p * f * 0.5;
     vec2 gi = floor(g);
-    vec2 o = gi + 0.25 + 0.5 * hash22(gi + vec2(float(k) * 1709.0, 0.0));
-    float present = step(hash22(gi + vec2(77.0, float(k) * 3001.0)).y, b.forest * 0.85);
-    float r = 1.25 * pxWorld * f * 0.5;
+    vec2 o = gi + 0.1 + 0.8 * hash22(gi + vec2(float(k) * 1709.0, 0.0));
+    float present = step(hash22(gi + vec2(77.0, float(k) * 3001.0)).y, (b.forest - 0.35) * 1.6);
+    float r = (0.9 + 0.7 * hash22(gi + vec2(5.0, float(k) * 911.0)).x) * pxWorld * f * 0.5;
     float dd = length(g - o);
     float a = (1.0 - smoothstep(r * 0.6, r * 1.2, dd)) * present;
     dots = max(dots, a * (k == 0 ? 1.0 - st : st));
@@ -569,7 +574,7 @@ void main() {
 
   float h0 = baseHeight(p);
   float h = h0 + detailHeight(p, h0);
-  vec2 clim = texture(tClimate, p / uClimateSpan).rg;
+  vec2 clim = textureBSpline(tClimate, p / uClimateSpan).rg;
   float tempC = clim.r - max(h, 0.0) * uLapse;
   float moist = clim.g;
 
@@ -647,7 +652,10 @@ void main() {
   if (uHexGrid > 0.0) {
     float he = hexEdgeDist(p) * uZoom;
     float g = lineAA(he, 0.5 * uPixelRatio) * uHexGrid;
-    col = mix(col, land ? vec3(0.1, 0.08, 0.06) : vec3(0.75, 0.85, 0.88), g * (land ? 0.35 : 0.18));
+    // ink on light ground, chalk on dark forest
+    float lum = dot(col, vec3(0.299, 0.587, 0.114));
+    vec3 ink = lum < 0.3 ? vec3(0.86, 0.82, 0.68) : vec3(0.1, 0.08, 0.06);
+    col = mix(col, land ? ink : vec3(0.75, 0.85, 0.88), g * (land ? (lum < 0.3 ? 0.3 : 0.35) : 0.18));
   }
 
   // ---- sheet edge: aged darkening on paper, thin frame line

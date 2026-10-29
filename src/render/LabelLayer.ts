@@ -21,7 +21,7 @@ export function drawLabels(ctx: CanvasRenderingContext2D, cssW: number, cssH: nu
   const onScreen = (x: number, y: number, m: number) => x > -m && y > -m && x < cssW + m && y < cssH + m;
 
   // ---- realm names: large, curved, letter-spaced (world zooms)
-  const realmAlpha = 1 - fade(z, 9, 15);
+  const realmAlpha = 1 - fade(z, 7, 12);
   if (realmAlpha > 0.01) {
     for (const l of a.realmLabels) drawCurved(ctx, l, toScreen, z, realmAlpha, onScreen);
   }
