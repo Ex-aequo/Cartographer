@@ -1,5 +1,5 @@
 import type { LabelCurve, MapData } from '../model/types';
-import { HexFlag } from '../model/types';
+import { HexFlag, Terrain } from '../model/types';
 import { buildNeighbors, hexAt, hexCenterX, hexCenterY, sampleField } from '../model/hex';
 import { Rng } from '../util/rng';
 import { Simplex2 } from '../util/noise';
@@ -44,6 +44,14 @@ export interface RenderAssets {
   distData: Uint8Array;
   /** Per hex, RGBA8: province+1 (16 bit LE in R,G), realm+1 (B,A). */
   hexOwners: Uint8Array;
+  /** Per hex, RGBA8: region+1 (16 bit LE in R,G), biome code (B), terrain code (A). */
+  hexAux: Uint8Array;
+  /** Per hex, RGBA32F: elevation, temperature °C, moisture, flags. */
+  hexData: Float32Array;
+  /** Cultivation 0..1 in world space, 1 texel per world unit. */
+  farm: Float32Array;
+  farmW: number;
+  farmH: number;
   /** Border warp offsets (RG float), grid point i at world i / 2. */
   warp: Float32Array;
   warpW: number;
@@ -178,6 +186,24 @@ export function buildRenderAssets(map: MapData, onProgress: (s: string, f: numbe
     hexOwners[k * 4 + 2] = (provRealm[p] + 1) & 255;
     hexOwners[k * 4 + 3] = (provRealm[p] + 1) >> 8;
   }
+  const nHex = grid.cols * grid.rows;
+  const hexAux = new Uint8Array(nHex * 4);
+  const hexData = new Float32Array(nHex * 4);
+  for (let k = 0; k < nHex; k++) {
+    const p = hex.province[k];
+    if (p >= 0) {
+      const rg = provinces[p].region + 1;
+      hexAux[k * 4] = rg & 255;
+      hexAux[k * 4 + 1] = rg >> 8;
+    }
+    hexAux[k * 4 + 2] = hex.biome[k];
+    hexAux[k * 4 + 3] = hex.terrain[k];
+    hexData[k * 4] = hex.elevation[k];
+    hexData[k * 4 + 1] = hex.temperature[k];
+    hexData[k * 4 + 2] = hex.moisture[k];
+    hexData[k * 4 + 3] = hex.flags[k];
+  }
+  const { farm, farmW, farmH } = buildFarmField(map);
   const warp = new Float32Array(ww * wh * 2);
   for (let k = 0; k < ww * wh; k++) {
     warp[k * 2] = warpX[k];
@@ -217,11 +243,11 @@ export function buildRenderAssets(map: MapData, onProgress: (s: string, f: numbe
     realmPalette.set([r.color[0], r.color[1], r.color[2], 255], (r.id + 1) * 4);
   });
 
-  return { idW, idH, provinceIds: provOf, distData, hexOwners, warp, warpW: ww, warpH: wh, realmLabels, regionLabels, provinceLabels, river, realmPalette };
+  return { idW, idH, provinceIds: provOf, distData, hexOwners, hexAux, hexData, farm, farmW, farmH, warp, warpW: ww, warpH: wh, realmLabels, regionLabels, provinceLabels, river, realmPalette };
 }
 
 export function transferablesOf(a: RenderAssets): ArrayBuffer[] {
-  return [a.hexOwners.buffer, a.warp.buffer, a.provinceIds.buffer, a.distData.buffer, a.river.position.buffer, a.river.normal.buffer, a.river.width.buffer, a.river.index.buffer, a.realmPalette.buffer] as ArrayBuffer[];
+  return [a.hexOwners.buffer, a.hexAux.buffer, a.hexData.buffer, a.farm.buffer, a.warp.buffer, a.provinceIds.buffer, a.distData.buffer, a.river.position.buffer, a.river.normal.buffer, a.river.width.buffer, a.river.index.buffer, a.realmPalette.buffer] as ArrayBuffer[];
 }
 
 function hexXY(map: MapData, h: number): [number, number] {
@@ -483,6 +509,7 @@ function buildRiverMesh(map: MapData): RiverMesh {
     if (t >= 0 && (up[t] < 0 || hex.flux[i] > hex.flux[up[t]])) up[t] = i;
   }
   const smoothedAt = new Map<number, [number, number]>();
+  const meander = new Simplex2(rng.fork('meander'));
   for (const r of map.rivers) {
     const path = r.hexes.slice();
     for (let k = 0; k < 2 && up[path[0]] >= 0; k++) path.unshift(up[path[0]]);
@@ -505,6 +532,28 @@ function buildRiverMesh(map: MapData): RiverMesh {
       pts[n0 - 1] = [a[0] + (b[0] - a[0]) * 0.75, a[1] + (b[1] - a[1]) * 0.75, b[2] * 1.15];
     }
     for (let it = 0; it < 3; it++) pts = chaikin(pts);
+    // meander: sideways wander along the course, fading out at both ends so
+    // sources, mouths and confluences stay put
+    {
+      const cum = [0];
+      for (let k = 1; k < pts.length; k++) cum.push(cum[k - 1] + Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]));
+      const L = cum[cum.length - 1];
+      const disp = pts.map((_, k) => {
+        const t = cum[k];
+        const taper = Math.min(1, t / 1.6, (L - t) / 1.6);
+        return taper <= 0 ? 0 : taper * (0.3 * meander.noise(t * 0.42, r.id * 7.7) + 0.12 * meander.noise(t * 1.3, r.id * 3.1 + 50));
+      });
+      pts = pts.map((q, k) => {
+        const a = pts[Math.max(0, k - 1)];
+        const b = pts[Math.min(pts.length - 1, k + 1)];
+        let tx = b[0] - a[0];
+        let ty = b[1] - a[1];
+        const l = Math.hypot(tx, ty) || 1;
+        tx /= l;
+        ty /= l;
+        return [q[0] - ty * disp[k], q[1] + tx * disp[k], q[2]];
+      });
+    }
     // tributaries end exactly on the smoothed course of the river they join
     const end = r.hexes[r.hexes.length - 1];
     const joined = smoothedAt.get(end);
@@ -559,4 +608,42 @@ function chaikin(pts: [number, number, number][]): [number, number, number][] {
   }
   out.push(pts[pts.length - 1]);
   return out;
+}
+
+/**
+ * Where people farm: Farmland hexes, and the open, temperate land around
+ * every settlement, strongest at the town and fading over two hexes.
+ */
+function buildFarmField(map: MapData): { farm: Float32Array; farmW: number; farmH: number } {
+  const { hex, grid } = map;
+  const farmW = Math.ceil(map.world.width) + 1;
+  const farmH = Math.ceil(map.world.height) + 1;
+  const farm = new Float32Array(farmW * farmH);
+  const arable = (h: number) => {
+    const t = hex.terrain[h];
+    return t === Terrain.Plains || t === Terrain.Farmland || t === Terrain.Steppe || t === Terrain.Hills;
+  };
+  const splat = (h: number, strength: number, radius: number) => {
+    const row = Math.floor(h / grid.cols);
+    const cx = hexCenterX(h % grid.cols, row);
+    const cy = hexCenterY(row);
+    const R = radius * 2;
+    for (let j = Math.max(0, Math.floor(cy - R)); j <= Math.min(farmH - 1, Math.ceil(cy + R)); j++)
+      for (let i = Math.max(0, Math.floor(cx - R)); i <= Math.min(farmW - 1, Math.ceil(cx + R)); i++) {
+        const d2 = (i - cx) ** 2 + (j - cy) ** 2;
+        const k = j * farmW + i;
+        farm[k] = Math.max(farm[k], strength * Math.exp(-d2 / (radius * radius)));
+      }
+  };
+  for (let h = 0; h < hex.terrain.length; h++) if (hex.terrain[h] === Terrain.Farmland) splat(h, 1, 1.4);
+  const nbr = buildNeighbors(grid);
+  for (const p of map.provinces) {
+    const c = p.capitalHex;
+    if (arable(c) && hex.temperature[c] > 2) splat(c, 1, 2.2);
+    for (let d = 0; d < 6; d++) {
+      const j = nbr[c * 6 + d];
+      if (j >= 0 && arable(j) && hex.temperature[j] > 2) splat(j, 0.7, 1.6);
+    }
+  }
+  return { farm, farmW, farmH };
 }

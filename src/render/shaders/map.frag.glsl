@@ -23,6 +23,10 @@ uniform sampler2D tClimate;  // R: sea-level temperature °C, G: moisture 0..1
 uniform vec2 uClimateSpan;
 uniform sampler2D tHex;      // per hex: RG province+1, BA realm+1 (nearest, cols x rows)
 uniform vec2 uGrid;          // cols, rows
+uniform sampler2D tFarm;     // cultivation 0..1, 1 texel per world unit (linear)
+uniform vec2 uFarmSpan;
+uniform sampler2D tHexAux;   // per hex: RG region+1, B biome, A terrain (nearest)
+uniform sampler2D tHexData;  // per hex: elevation, temperature, moisture, flags (float, nearest)
 uniform sampler2D tWarp;     // RG border warp offset, world units (linear)
 uniform vec2 uWarpSize;      // texels; grid point i sits at world i / 2
 uniform float uSigma2;       // border smoothing kernel (shrinks toward hex edges at hex zoom)
@@ -40,6 +44,14 @@ uniform float uSelProv;      // province+1, 0 = none
 uniform float uHoverProv;
 uniform float uHexGrid;      // 0..1 visibility
 uniform float uLapse;
+uniform float uRelief;
+uniform float uDebug;
+uniform float uDataMode;     // 0 art, 1 continuous ramp, 2 categories
+uniform float uSource;       // 0 elevation, 1 temperature, 2 moisture, 3 biome, 4 terrain
+uniform int uRampN;
+uniform float uRampPos[9];
+uniform vec3 uRampCol[9];
+uniform vec3 uCatCol[16];       // 0 off, 1 base height, 2 lighting only      // gully strength multiplier (quality / style)
 
 const vec3 LIGHT = normalize(vec3(-0.55, -0.65, 0.58)); // from the north-west (world y points south)
 
@@ -138,35 +150,96 @@ vec4 textureBSpline(sampler2D tex, vec2 uv) {
 
 float baseHeight(vec2 p) { return textureBSpline(tHeight, p / uHeightSpan).r; }
 
-float detailHeight(vec2 p, float h) {
-  float mtn = smoothstep(0.12, 0.6, h);
-  float d = 0.0;
-  float amp = 1.0;
-  float f = 0.7;
-  // gain < 1/lacunarity: slopes calm down at each finer octave
+// Gully noise (after Clay John / Fewes "erosion noise"): stripes that run
+// downhill along the local slope, layered over several octaves, each octave
+// bending to follow the gullies of the one before. Reads like water-carved
+// rock instead of generic noise. Returns (height, d/dx, d/dy).
+vec3 gullies(vec2 p, vec2 dir) {
+  vec2 ip = floor(p);
+  vec2 fp = fract(p);
+  const float TAU = 6.2831853;
+  vec3 va = vec3(0.0);
+  float wt = 0.0;
+  for (int i = -2; i <= 1; i++) {
+    for (int j = -2; j <= 1; j++) {
+      vec2 o = vec2(float(i), float(j));
+      vec2 hh = hash22(ip - o) * 0.5;
+      vec2 pp = fp + o - hh;
+      float w = exp(-dot(pp, pp) * 2.0);
+      wt += w;
+      float mag = dot(pp, dir);
+      va += vec3(cos(mag * TAU), -sin(mag * TAU) * dir) * w;
+    }
+  }
+  return va / wt;
+}
+
+// Height and exact analytic gradient of the base heightfield: a cubic
+// B-spline over 16 texel fetches. (Hardware-filtered taps quantise their
+// weights, which shows up as blocky shading once slopes are lit.)
+vec4 bsW(float t) {
+  float t2 = t * t;
+  float t3 = t2 * t;
+  return vec4(1.0 - 3.0 * t + 3.0 * t2 - t3, 4.0 - 6.0 * t2 + 3.0 * t3, 1.0 + 3.0 * t + 3.0 * t2 - 3.0 * t3, t3) / 6.0;
+}
+vec4 bsD(float t) {
+  float t2 = t * t;
+  return vec4(-3.0 + 6.0 * t - 3.0 * t2, -12.0 * t + 9.0 * t2, 3.0 + 6.0 * t - 9.0 * t2, 3.0 * t2) / 6.0;
+}
+vec3 baseHeightGrad(vec2 p) {
+  ivec2 size = textureSize(tHeight, 0);
+  vec2 texPerWorld = vec2(size) / uHeightSpan;
+  vec2 c = p * texPerWorld - 0.5;
+  vec2 i = floor(c);
+  vec2 f = c - i;
+  vec4 wx = bsW(f.x), wy = bsW(f.y), dx = bsD(f.x), dy = bsD(f.y);
+  ivec2 base = ivec2(i) - 1;
+  ivec2 hi = size - 1;
+  float h = 0.0, gx = 0.0, gy = 0.0;
+  for (int b = 0; b < 4; b++) {
+    float rh = 0.0, rd = 0.0;
+    int yy = clamp(base.y + b, 0, hi.y);
+    for (int a = 0; a < 4; a++) {
+      float v = texelFetch(tHeight, ivec2(clamp(base.x + a, 0, hi.x), yy), 0).r;
+      rh += v * wx[a];
+      rd += v * dx[a];
+    }
+    h += rh * wy[b];
+    gx += rd * wy[b];
+    gy += rh * dy[b];
+  }
+  return vec3(h, gx * texPerWorld.x, gy * texPerWorld.y);
+}
+
+// Full relief: base + gullies. (height, d/dx, d/dy), world units.
+vec3 relief(vec2 p, vec3 base) {
+  float h = base.x;
+  if (h <= 0.0) return base;
+  vec2 g = base.yz;
+  // gullies need both height and slope: high plateaus stay calm
+  float mtn = smoothstep(0.1, 0.5, h) * smoothstep(0.015, 0.12, length(g));
+  vec3 acc = vec3(0.0);
+  float a = mix(0.003, 0.045, mtn) * uRelief;
+  float f = 1.1;
   for (int i = 0; i < 6; i++) {
     float w = lod(f);
     if (w <= 0.0) break;
-    float n = snoise(p * f + float(i) * 7.31);
-    float r = 1.0 - abs(n);
-    d += amp * w * mix(n * 0.5, r * r - 0.45, mtn);
-    amp *= 0.36;
-    f *= 2.1;
+    vec2 gg = g + acc.yz;
+    float slope = length(gg);
+    vec2 dir = slope > 1e-5 ? vec2(gg.y, -gg.x) / slope : vec2(1.0, 0.0);
+    float k = smoothstep(0.01, 0.15, slope); // flat ground gets no gullies
+    vec3 e = gullies(p * f, dir);
+    acc += vec3(e.x, e.yz * f) * a * w * mix(0.1, 1.0, k);
+    a *= 0.42;
+    f *= 2.05;
   }
-  return d * (0.0012 + 0.011 * mtn) * step(0.0, h);
+  // gullies cut down more than they build up
+  acc.x -= mix(0.003, 0.045, mtn) * uRelief * 0.35;
+  return vec3(max(h + acc.x, 0.0005), g + acc.yz);
 }
 
-float fullHeight(vec2 p) {
-  float h = baseHeight(p);
-  return h + detailHeight(p, h);
-}
-
-vec3 reliefNormal(vec2 p, float h, float exaggeration) {
-  float e = max(0.6 / uZoom, 0.08);
-  float hx = fullHeight(p + vec2(e, 0.0));
-  float hy = fullHeight(p + vec2(0.0, e));
-  float s = exaggeration / e;
-  return normalize(vec3(-(hx - h) * s, -(hy - h) * s, 1.0));
+vec3 normalFrom(vec3 hg, float exaggeration) {
+  return normalize(vec3(-hg.y * exaggeration, -hg.z * exaggeration, 1.0));
 }
 
 // --------------------------------------------------------------- colour ---
@@ -262,8 +335,65 @@ float canopyShadow(vec2 p, float density, float cell) {
   return s;
 }
 
+// Fields seen from above: long strips in blocks whose orientation follows
+// the lie of the land, each strip its own crop, with darker hedgerows.
+vec3 fields(vec2 p, vec3 ground, float tempC, float moist) {
+  // parishes: coarse cells, each with its own field orientation (rotating
+  // per cell, not continuously, keeps strips straight)
+  // irregular parishes: Voronoi cells around jittered points
+  const float PAR = 2.6;
+  vec2 g0 = floor(p / PAR);
+  float d1 = 1e9, d2 = 1e9;
+  vec2 pc = g0, site = vec2(0.0);
+  for (int y = -1; y <= 1; y++)
+    for (int x = -1; x <= 1; x++) {
+      vec2 c = g0 + vec2(float(x), float(y));
+      vec2 sp = (c + 0.15 + 0.7 * hash22(c + vec2(53.0, 211.0))) * PAR;
+      float d = length(p - sp);
+      if (d < d1) { d2 = d1; d1 = d; pc = c; site = sp; }
+      else if (d < d2) { d2 = d; }
+    }
+  float parEdge = 0.5 * (d2 - d1);
+  vec2 ph = hash22(pc + vec2(91.0, 7.0));
+  float ang = (ph.x - 0.5) * 1.4;
+  float ca = cos(ang), sa = sin(ang);
+  vec2 q = mat2(ca, -sa, sa, ca) * (p - site);
+  // blocks of strips
+  vec2 block = q / vec2(0.9, 0.62) + ph * 7.0;
+  vec2 bi = floor(block);
+  vec2 bh = hash22(bi + pc * 31.0 + vec2(311.0, 17.0));
+  float across = bh.x > 0.5 ? q.y : q.x;
+  float stripW = 0.11 + 0.08 * bh.y;
+  float si = floor(across / stripW);
+  float sf = fract(across / stripW);
+  float crop = hash22(vec2(si, 0.0) + bi * 13.0 + pc * 5.0).x;
+  vec3 wheat = vec3(0.80, 0.70, 0.40);
+  vec3 green = vec3(0.47, 0.57, 0.28);
+  vec3 young = vec3(0.62, 0.66, 0.38);
+  vec3 fallow = vec3(0.56, 0.45, 0.31);
+  vec3 cc = crop < 0.3 ? wheat : (crop < 0.55 ? green : (crop < 0.8 ? young : fallow));
+  cc = mix(cc, cc * vec3(1.05, 0.95, 0.8), smoothstep(0.35, 0.15, moist) * 0.6);
+  cc = mix(ground, cc, 0.75);
+  cc *= 0.94 + 0.12 * hash22(vec2(si, 7.0) + bi).y;
+  // block colour when single strips are too small to see
+  float bcrop = bh.y;
+  vec3 bc = mix(ground, bcrop < 0.4 ? wheat : (bcrop < 0.75 ? green : young), 0.6);
+  cc = mix(bc, cc, smoothstep(5.0, 10.0, stripW * uZoom / uPixelRatio));
+  // hedgerows around blocks and parishes, furrows between strips
+  vec2 bf = fract(block);
+  vec2 be = min(bf, 1.0 - bf) * vec2(0.9, 0.62);
+  float edge = min(min(be.x, be.y), parEdge);
+  float hedge = 1.0 - smoothstep(0.0, 0.025, edge);
+  float furrow = 1.0 - smoothstep(0.0, 0.1, min(sf, 1.0 - sf));
+  cc = mix(cc, cc * 0.88, furrow * smoothstep(7.0, 14.0, stripW * uZoom / uPixelRatio) * 0.6);
+  cc = mix(cc, vec3(0.22, 0.28, 0.16), hedge * smoothstep(14.0, 30.0, uZoom / uPixelRatio) * 0.75);
+  // far away: a soft patchwork tint
+  vec3 avg = mix(ground, vec3(0.66, 0.63, 0.38), 0.5);
+  return mix(avg, cc, smoothstep(3.0, 8.0, 0.75 * uZoom / uPixelRatio));
+}
+
 // ----------------------------------------------------------- the looks ---
-vec3 terrainLook(vec2 p, float h, vec3 N, float tempC, float moist, float coastDist) {
+vec3 terrainLook(vec2 p, float h, float h0, vec3 N, float tempC, float moist, float coastDist) {
   if (h < 0.0) {
     // ---- water
     float depth = -h;
@@ -301,20 +431,30 @@ vec3 terrainLook(vec2 p, float h, vec3 N, float tempC, float moist, float coastD
   c *= 0.96 + 0.1 * grain;
 
   // beaches on warm coasts
-  float beach = (1.0 - smoothstep(0.002, 0.009, h)) * smoothstep(8.0, 16.0, tempC) * (1.0 - b.forest * 0.6) * (1.0 - smoothstep(0.08, 0.2, 1.0 - N.z));
+  float beach = (1.0 - smoothstep(0.004, 0.02, h)) * (1.0 - smoothstep(0.06, 0.28 + 0.1 * snoise(p * 0.9), coastDist))
+    * smoothstep(8.0, 16.0, tempC) * (1.0 - b.forest * 0.6) * (1.0 - smoothstep(0.08, 0.2, 1.0 - N.z));
   c = mix(c, vec3(0.82, 0.74, 0.56), beach * 0.75);
 
   // rock on steep slopes and high ground
   float slope = 1.0 - N.z;
   float rockMix = smoothstep(0.3, 0.6, slope) + smoothstep(0.45, 0.72, h) * 0.75;
   rockMix = clamp(rockMix, 0.0, 1.0);
-  float strata = snoise(vec2(p.x * 0.6, h * 60.0)) * 0.5 + 0.5;
-  vec3 rock = mix(vec3(0.42, 0.39, 0.35), vec3(0.58, 0.53, 0.46), strata);
+  float strata = snoise(p * 0.45 + vec2(h * 6.0, 0.0)) * 0.5 + 0.5;
+  vec3 rock = mix(vec3(0.44, 0.38, 0.31), vec3(0.62, 0.55, 0.45), strata);
+  rock = mix(rock, vec3(0.36, 0.34, 0.32), smoothstep(0.55, 0.8, h)); // high bare granite
   c = mix(c, rock, rockMix);
+
+  // farmland: a patchwork of fields, hedges and fallow around towns
+  float farm = texture(tFarm, (p + 0.5) / uFarmSpan).r;
+  farm *= smoothstep(0.15, 0.55, farm + 0.25 * snoise(p * 0.5)) * (1.0 - rockMix) * (1.0 - beach) * smoothstep(-2.0, 4.0, tempC);
+  if (farm > 0.01) {
+    vec3 fc = fields(p, c, tempC, moist);
+    c = mix(c, fc, farm * 0.9);
+  }
 
   // forest canopy; fades into a dark tint when trees are smaller than a few pixels
   float clump = smoothstep(-0.35, 0.45, snoise(p * 0.35) + 0.25 * snoise(p * 1.4));
-  float fd = clamp(b.forest * (0.55 + 0.6 * clump), 0.0, 1.0) * (1.0 - rockMix) * (1.0 - beach);
+  float fd = clamp(b.forest * (0.55 + 0.6 * clump), 0.0, 1.0) * (1.0 - rockMix) * (1.0 - beach) * (1.0 - farm * 0.9);
   vec3 treeBase = mix(vec3(0.20, 0.29, 0.15), vec3(0.15, 0.24, 0.16), smoothstep(5.0, -5.0, tempC));
   treeBase = mix(treeBase, vec3(0.13, 0.27, 0.12), smoothstep(20.0, 26.0, tempC));
   const float CELL = 0.085;
@@ -334,13 +474,18 @@ vec3 terrainLook(vec2 p, float h, vec3 N, float tempC, float moist, float coastD
 
   // snow: cold places and peaks; slides off the steepest faces
   float snow = b.snow * (1.0 - smoothstep(0.55, 0.85, slope) * 0.7);
-  snow *= 0.85 + 0.3 * snoise(p * 2.0);
-  c = mix(c, vec3(0.93, 0.95, 0.97), clamp(snow, 0.0, 1.0));
+  snow *= 0.9 + 0.2 * snoise(p * 0.6);
+  // snow is smooth: undo most of the ground grain under it
+  vec3 snowC = vec3(0.93, 0.95, 0.97) * (0.97 + 0.03 * grain);
+  c = mix(c, snowC, clamp(snow, 0.0, 1.0));
 
   // lighting
   float diff = max(dot(N, LIGHT), 0.0);
-  float lit = 0.45 + 0.55 * diff / LIGHT.z;
-  lit = clamp(lit, 0.32, 1.25);
+  float lit = 0.4 + 0.62 * diff / LIGHT.z;
+  lit = clamp(lit, 0.26, 1.3);
+  // ambient occlusion from gully depth: valleys darker, crests catch light
+  float cav = clamp((h - h0) * 40.0, -1.0, 1.0);
+  lit *= 1.0 + 0.12 * cav * smoothstep(0.1, 0.4, h);
   c *= lit;
   // cool shadows, warm light (painterly)
   c = mix(c, c * vec3(0.86, 0.92, 1.08), (1.0 - clamp(lit, 0.0, 1.0)) * 0.6);
@@ -503,13 +648,37 @@ float borderDist(float wa, vec2 ga, float wb, vec2 gb) {
   return f / max(length(g), 1e-6);
 }
 
-void owners(vec2 p, out Owner prov, out Owner realm) {
+// Groups the seven hex votes by owner id and returns the winner and the
+// distance to its nearest rival.
+Owner tally(float ids[7], float ws[7], vec2 gs[7], int n) {
+  float uid[7]; float uw[7]; vec2 ug[7];
+  int m = 0;
+  for (int k = 0; k < 7; k++) {
+    if (k >= n) break;
+    if (ids[k] < 0.5) continue;
+    bool found = false;
+    for (int j = 0; j < 7; j++) {
+      if (j >= m) break;
+      if (uid[j] == ids[k]) { uw[j] += ws[k]; ug[j] += gs[k]; found = true; break; }
+    }
+    if (!found) { uid[m] = ids[k]; uw[m] = ws[k]; ug[m] = gs[k]; m++; }
+  }
+  Owner o = Owner(0.0, 1e3);
+  if (m == 0) return o;
+  int a = 0; int b = -1;
+  for (int j = 1; j < 7; j++) { if (j >= m) break; if (uw[j] > uw[a]) a = j; }
+  for (int j = 0; j < 7; j++) { if (j >= m) break; if (j != a && (b < 0 || uw[j] > uw[b])) b = j; }
+  o.id = uid[a];
+  if (b >= 0) o.dist = borderDist(uw[a], ug[a], uw[b], ug[b]);
+  return o;
+}
+
+void owners(vec2 p, out Owner prov, out Owner realm, out Owner region) {
   vec2 w = texture(tWarp, (p * 2.0 + 0.5) / uWarpSize).rg * uWarpAmt;
   vec2 q = p + w;
   ivec2 h0 = hexOf(q);
-  float pid[7]; float pw[7]; vec2 pg[7];
-  float rid[7]; float rw[7]; vec2 rg[7];
-  int np = 0; int nr = 0;
+  float pid[7]; float rid[7]; float gid[7]; float ws[7]; vec2 gs[7];
+  int n = 0;
   bool odd = (h0.y & 1) == 1;
   for (int k = 0; k < 7; k++) {
     ivec2 o = ivec2(0);
@@ -524,36 +693,19 @@ void owners(vec2 p, out Owner prov, out Owner realm) {
     vec4 t = texelFetch(tHex, h, 0) * 255.0;
     float idp = t.r + t.g * 256.0;
     if (idp < 0.5) continue;
-    float idr = t.b + t.a * 256.0;
+    vec4 t2 = texelFetch(tHexAux, h, 0) * 255.0;
     vec2 dv = q - hexCenter(h);
     float wt = exp(-dot(dv, dv) / uSigma2);
-    vec2 gr = -2.0 * dv / uSigma2 * wt;
-    bool found = false;
-    for (int j = 0; j < 7; j++) {
-      if (j >= np) break;
-      if (pid[j] == idp) { pw[j] += wt; pg[j] += gr; found = true; break; }
-    }
-    if (!found) { pid[np] = idp; pw[np] = wt; pg[np] = gr; np++; }
-    found = false;
-    for (int j = 0; j < 7; j++) {
-      if (j >= nr) break;
-      if (rid[j] == idr) { rw[j] += wt; rg[j] += gr; found = true; break; }
-    }
-    if (!found) { rid[nr] = idr; rw[nr] = wt; rg[nr] = gr; nr++; }
+    pid[n] = idp;
+    rid[n] = t.b + t.a * 256.0;
+    gid[n] = t2.r + t2.g * 256.0;
+    ws[n] = wt;
+    gs[n] = -2.0 * dv / uSigma2 * wt;
+    n++;
   }
-  prov = Owner(0.0, 1e3);
-  realm = Owner(0.0, 1e3);
-  if (np == 0) return;
-  int a = 0; int b = -1;
-  for (int j = 1; j < 7; j++) { if (j >= np) break; if (pw[j] > pw[a]) a = j; }
-  for (int j = 0; j < 7; j++) { if (j >= np) break; if (j != a && (b < 0 || pw[j] > pw[b])) b = j; }
-  prov.id = pid[a];
-  if (b >= 0) prov.dist = borderDist(pw[a], pg[a], pw[b], pg[b]);
-  a = 0; b = -1;
-  for (int j = 1; j < 7; j++) { if (j >= nr) break; if (rw[j] > rw[a]) a = j; }
-  for (int j = 0; j < 7; j++) { if (j >= nr) break; if (j != a && (b < 0 || rw[j] > rw[b])) b = j; }
-  realm.id = rid[a];
-  if (b >= 0) realm.dist = borderDist(rw[a], rg[a], rw[b], rg[b]);
+  prov = tally(pid, ws, gs, n);
+  realm = tally(rid, ws, gs, n);
+  region = tally(gid, ws, gs, n);
 }
 
 void main() {
@@ -572,8 +724,10 @@ void main() {
     return;
   }
 
-  float h0 = baseHeight(p);
-  float h = h0 + detailHeight(p, h0);
+  vec3 bhg = baseHeightGrad(p);
+  float h0 = bhg.x;
+  vec3 hg = relief(p, bhg);
+  float h = hg.x;
   vec2 clim = textureBSpline(tClimate, p / uClimateSpan).rg;
   float tempC = clim.r - max(h, 0.0) * uLapse;
   float moist = clim.g;
@@ -581,28 +735,62 @@ void main() {
   float coastDist = texture(tDist, p / uIdSpan).b * 255.0 / uCoastScale / uIdRes; // world units
   Owner po;
   Owner ro;
-  owners(p, po, ro);
+  Owner go;
+  owners(p, po, ro, go);
+  float regionDist = go.dist;
   float prov = po.id;
   float realm = ro.id;
   float provDist = po.dist;
   float realmDist = ro.dist;
 
+  if (uDebug > 0.5) {
+    vec3 n = normalFrom(hg, 4.0);
+    float v = uDebug < 1.5 ? fract(h0 * 20.0) : max(dot(n, LIGHT), 0.0);
+    fragColor = vec4(vec3(v), 1.0);
+    return;
+  }
+
   float paperMix = uPaperMix;
   vec3 col;
   vec3 N = vec3(0.0, 0.0, 1.0);
   if (paperMix < 0.999) {
-    float ex = mix(4.2, 1.3, smoothstep(5.0, 40.0, uZoom / uPixelRatio));
-    N = reliefNormal(p, h, h < 0.0 ? ex * 0.4 : ex);
-    col = terrainLook(p, h, N, tempC, moist, coastDist);
+    float ex = mix(4.2, 2.6, smoothstep(5.0, 40.0, uZoom / uPixelRatio));
+    N = normalFrom(hg, h < 0.0 ? ex * 0.4 : ex);
+    col = terrainLook(p, h, h0, N, tempC, moist, coastDist);
   }
   if (paperMix > 0.001) {
-    vec3 Np = paperMix < 0.999 ? N : reliefNormal(p, h, h < 0.0 ? 1.5 : 6.0);
+    vec3 Np = paperMix < 0.999 ? N : normalFrom(hg, h < 0.0 ? 1.5 : 6.0);
     vec3 pc = paperLook(p, h, Np, tempC, moist, coastDist, pxWorld);
     col = paperMix < 0.999 ? mix(col, pc, paperMix) : pc;
   }
 
   bool land = h0 >= 0.0;
   float landA = smoothstep(-0.002, 0.002, h0);
+
+  // ---- data map modes: the game values of each hex, flat and exact
+  if (uDataMode > 0.5) {
+    ivec2 hh = clamp(hexOf(p), ivec2(0), ivec2(uGrid) - 1);
+    vec4 d = texelFetch(tHexData, hh, 0);
+    vec4 aux = texelFetch(tHexAux, hh, 0) * 255.0;
+    bool hexLand = mod(d.a, 2.0) > 0.5;
+    vec3 dc;
+    if (uDataMode < 1.5) {
+      float v = uSource < 0.5 ? d.r : (uSource < 1.5 ? d.g : d.b);
+      dc = uRampCol[0];
+      for (int k = 1; k < 9; k++) {
+        if (k >= uRampN) break;
+        if (v >= uRampPos[k - 1]) dc = mix(uRampCol[k - 1], uRampCol[k], clamp((v - uRampPos[k - 1]) / max(uRampPos[k] - uRampPos[k - 1], 1e-6), 0.0, 1.0));
+      }
+      if (!hexLand && uSource > 1.5) dc = vec3(0.42, 0.50, 0.56); // rainfall is a land value
+    } else {
+      int idx = int((uSource < 3.5 ? aux.b : aux.a) + 0.5);
+      dc = uCatCol[clamp(idx, 0, 15)];
+    }
+    // keep a little relief so the land stays readable
+    vec3 Nd = normalFrom(hg, 3.0);
+    float sh = clamp(0.82 + 0.3 * (max(dot(Nd, LIGHT), 0.0) / LIGHT.z - 1.0), 0.62, 1.08);
+    col = dc * (hexLand ? sh : 1.0) * mix(1.0, 0.97 + 0.04 * snoise(p * 0.08), paperMix);
+  }
 
   // ---- realm colouring
   if (realm > 0.5 && uPolitical > 0.0) {
@@ -618,10 +806,21 @@ void main() {
 
   // ---- province borders: hairlines, stronger when zoomed in
   float provPx = provDist * uZoom;
-  float provVis = smoothstep(2.0 * uPixelRatio, 6.0 * uPixelRatio, uZoom) * landA;
-  float provLine = lineAA(provPx, 0.55 * uPixelRatio) * provVis;
+  float zc = uZoom / uPixelRatio;
+  float provVis = smoothstep(2.0, 6.0, zc) * landA;
+  float provLine = lineAA(provPx, 0.5 * uPixelRatio) * provVis;
   vec3 provInk = mix(vec3(0.12, 0.10, 0.08), vec3(0.35, 0.26, 0.18), paperMix);
-  col = mix(col, provInk, provLine * mix(0.5, 0.4, paperMix));
+  // faint at realm zoom (regions lead there), firmer once provinces matter
+  float provA = mix(0.22, 0.5, smoothstep(9.0, 18.0, zc));
+  col = mix(col, provInk, provLine * mix(provA, 0.35, paperMix));
+
+  // ---- region (duchy) borders: between province and realm weight
+  float regionVis = smoothstep(3.0, 6.0, uZoom / uPixelRatio) * (1.0 - smoothstep(30.0, 60.0, uZoom / uPixelRatio)) * landA;
+  if (regionVis > 0.0 && regionDist < realmDist - 0.01) {
+    float rpx = regionDist * uZoom;
+    float rline = lineAA(rpx, 1.05 * uPixelRatio) * regionVis;
+    col = mix(col, mix(vec3(0.12, 0.09, 0.06), vec3(0.28, 0.19, 0.12), paperMix), rline * 0.72);
+  }
 
   // ---- realm borders: thick, two-tone (each side draws its own colour)
   float realmPx = realmDist * uZoom;
@@ -638,7 +837,7 @@ void main() {
   // ---- coastline ink (paper) / wet edge line (terrain)
   float hw = fwidth(h0);
   float coastLine = 1.0 - smoothstep(0.6, 1.8, abs(h0) / max(hw, 1e-5));
-  col = mix(col, vec3(0.27, 0.20, 0.14), coastLine * mix(0.28, 0.85, paperMix));
+  col = mix(col, vec3(0.27, 0.20, 0.14), coastLine * mix(0.28, 0.85, paperMix) * (uDataMode > 0.5 ? 0.35 : 1.0));
 
   // ---- hover and selection
   if (uHoverProv > 0.5 && abs(prov - uHoverProv) < 0.5) col = mix(col, vec3(1.0, 0.97, 0.88), 0.1);

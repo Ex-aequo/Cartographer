@@ -86,6 +86,7 @@ export function WorldPanel({ params, onChange, onGenerate, busy }: Props) {
 
           <Slider label="Land" value={params.landFraction} min={0.2} max={0.65} step={0.01} format={(v) => `${Math.round(v * 100)}%`} onChange={(v) => set('landFraction', v)} />
           <Slider label="Mountains" value={params.mountains} min={0} max={1} step={0.05} format={(v) => (v < 0.3 ? 'Gentle' : v < 0.7 ? 'Rugged' : 'Towering')} onChange={(v) => set('mountains', v)} />
+          <Slider label="Valleys" value={params.erosion} min={0} max={1} step={0.05} format={(v) => (v < 0.2 ? 'Raw' : v < 0.7 ? 'Weathered' : 'Deeply carved')} onChange={(v) => set('erosion', v)} />
           <Slider label="Rainfall" value={params.rainfall} min={0.5} max={1.5} step={0.05} format={(v) => (v < 0.8 ? 'Arid' : v < 1.2 ? 'Moderate' : 'Wet')} onChange={(v) => set('rainfall', v)} />
 
           <label className="field">

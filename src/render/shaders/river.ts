@@ -13,7 +13,9 @@ out float vAlpha;
 void main() {
   float wpx = aWidth * uZoom;
   float minPx = 1.1 * uPixelRatio;
-  float half_ = max(wpx, minPx) * 0.5;
+  // up close, rivers stop growing with the map so hexes stay readable
+  float maxPx = (8.5 + 0.06 * wpx / uPixelRatio) * uPixelRatio;
+  float half_ = clamp(wpx, minPx, maxPx) * 0.5;
   float side = (gl_VertexID % 2 == 0) ? -1.0 : 1.0;
   float ext = half_ + 1.2 * uPixelRatio;
   vec2 world = position + aNormal * (ext / uZoom);

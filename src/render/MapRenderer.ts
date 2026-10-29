@@ -3,6 +3,8 @@ import type { MapData } from '../model/types';
 import type { RenderAssets } from './assets';
 import { BORDER_SIGMA2, COAST_SCALE, ID_RES } from './assets';
 import { LAPSE } from '../gen/biomes';
+import { categoriesFor, modeDef, rampFor, type MapMode } from './mapModes';
+export type { MapMode } from './mapModes';
 import mapFrag from './shaders/map.frag.glsl?raw';
 import { riverFrag, riverVert } from './shaders/river';
 
@@ -14,7 +16,6 @@ export interface View {
   zoom: number;
 }
 
-export type MapMode = 'political' | 'terrain';
 
 export interface RenderState {
   view: View;
@@ -32,6 +33,15 @@ export const ZOOM = {
   min: 0.6,
   max: 220,
 };
+
+export type Quality = 'high' | 'balanced' | 'fast';
+
+export function pixelRatioFor(q: Quality): number {
+  const dpr = window.devicePixelRatio || 1;
+  if (q === 'high') return Math.min(dpr, 2);
+  if (q === 'balanced') return Math.min(dpr, 1.25);
+  return Math.min(dpr, 1) * 0.7;
+}
 
 export function hexFactor(zoom: number): number {
   const t = Math.min(1, Math.max(0, (zoom - ZOOM.hexStart) / (ZOOM.hexFull - ZOOM.hexStart)));
@@ -61,7 +71,7 @@ export class MapRenderer {
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false, powerPreference: 'high-performance', preserveDrawingBuffer: false });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    this.renderer.setPixelRatio(pixelRatioFor('high'));
     this.renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
     this.renderer.autoClear = true;
     this.renderer.setClearColor(0x1d1610);
@@ -88,6 +98,10 @@ export class MapRenderer {
         uClimateSpan: { value: new THREE.Vector2(1, 1) },
         tHex: { value: null },
         uGrid: { value: new THREE.Vector2(1, 1) },
+        tHexAux: { value: null },
+        tFarm: { value: null },
+        uFarmSpan: { value: new THREE.Vector2(1, 1) },
+        tHexData: { value: null },
         tWarp: { value: null },
         uWarpSize: { value: new THREE.Vector2(1, 1) },
         uSigma2: { value: BORDER_SIGMA2 },
@@ -103,6 +117,14 @@ export class MapRenderer {
         uHoverProv: { value: 0 },
         uHexGrid: { value: 0 },
         uLapse: { value: LAPSE },
+        uRelief: { value: 1 },
+        uDebug: { value: 0 },
+        uDataMode: { value: 0 },
+        uSource: { value: 0 },
+        uRampN: { value: 0 },
+        uRampPos: { value: new Array(9).fill(0) },
+        uRampCol: { value: Array.from({ length: 9 }, () => new THREE.Vector3()) },
+        uCatCol: { value: Array.from({ length: 16 }, () => new THREE.Vector3()) },
       },
     });
     const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.mapMat);
@@ -148,6 +170,18 @@ export class MapRenderer {
     hexTex.needsUpdate = true;
     u.tHex.value = hexTex;
     u.uGrid.value.set(map.grid.cols, map.grid.rows);
+    const hexAux = new THREE.DataTexture(a.hexAux, map.grid.cols, map.grid.rows, THREE.RGBAFormat, THREE.UnsignedByteType);
+    hexAux.minFilter = hexAux.magFilter = THREE.NearestFilter;
+    hexAux.needsUpdate = true;
+    u.tHexAux.value = hexAux;
+    const farm = new THREE.DataTexture(a.farm, a.farmW, a.farmH, THREE.RedFormat, THREE.FloatType);
+    linear(farm);
+    u.tFarm.value = farm;
+    u.uFarmSpan.value.set(a.farmW, a.farmH);
+    const hexData = new THREE.DataTexture(a.hexData, map.grid.cols, map.grid.rows, THREE.RGBAFormat, THREE.FloatType);
+    hexData.minFilter = hexData.magFilter = THREE.NearestFilter;
+    hexData.needsUpdate = true;
+    u.tHexData.value = hexData;
     const warp = new THREE.DataTexture(a.warp, a.warpW, a.warpH, THREE.RGFormat, THREE.FloatType);
     linear(warp);
     u.tWarp.value = warp;
@@ -163,7 +197,7 @@ export class MapRenderer {
     pal.needsUpdate = true;
     u.tPalette.value = pal;
     u.uPaletteSize.value = palCount;
-    this.textures.push(height, climate, hexTex, warp, dist, pal);
+    this.textures.push(height, climate, hexTex, hexAux, hexData, farm, warp, dist, pal);
 
     if (this.riverMesh) {
       this.scene.remove(this.riverMesh);
@@ -197,6 +231,7 @@ export class MapRenderer {
     u.uPixelRatio.value = pr;
     u.uPaperMix.value = paperMixFor(s.view.zoom);
     u.uPolitical.value = s.mode === 'political' ? 1 : 0;
+    if (s.mode !== this.lastMode) this.applyMode(s.mode);
     u.uSelProv.value = s.selectedProvince + 1;
     u.uHoverProv.value = s.hoveredProvince + 1;
     const hz = hexFactor(s.view.zoom);
@@ -205,6 +240,40 @@ export class MapRenderer {
     u.uSigma2.value = BORDER_SIGMA2 + (0.04 - BORDER_SIGMA2) * hz;
     u.uWarpAmt.value = 1 - hz;
     this.renderer.render(this.scene, this.camera);
+  }
+
+  private lastMode: MapMode | null = null;
+
+  private applyMode(m: MapMode): void {
+    this.lastMode = m;
+    const u = this.mapMat.uniforms;
+    const d = modeDef(m);
+    u.uDataMode.value = d.shader;
+    u.uSource.value = d.source ?? 0;
+    const ramp = rampFor(m);
+    if (ramp) {
+      u.uRampN.value = ramp.stops.length;
+      ramp.stops.forEach((v, i) => {
+        u.uRampPos.value[i] = v;
+        u.uRampCol.value[i].set(ramp.colors[i][0] / 255, ramp.colors[i][1] / 255, ramp.colors[i][2] / 255);
+      });
+    }
+    const cats = categoriesFor(m);
+    if (cats) for (const c of cats) u.uCatCol.value[c.code].set(c.color[0] / 255, c.color[1] / 255, c.color[2] / 255);
+  }
+
+  setQuality(q: Quality): void {
+    const size = this.renderer.getSize(new THREE.Vector2());
+    this.renderer.setPixelRatio(pixelRatioFor(q));
+    this.renderer.setSize(size.x, size.y, false);
+    // fewer gully octaves on the fastest setting
+    this.mapMat.uniforms.uRelief.value = q === 'fast' ? 0.85 : 1;
+  }
+
+  /** Debug and test hook: override a shader uniform. */
+  setUniform(name: string, value: number): void {
+    const u = this.mapMat.uniforms[name];
+    if (u) u.value = value;
   }
 
   get worldSize() {

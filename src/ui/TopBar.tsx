@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
+import type { Quality } from '../render/MapRenderer';
 
 interface Props {
+  quality: Quality;
+  onQuality(q: Quality): void;
   name: string;
   hasMap: boolean;
   onOpen(file: File): void;
@@ -9,7 +12,7 @@ interface Props {
   onExportImage(): void;
 }
 
-export function TopBar({ name, hasMap, onOpen, onSave, onExportData, onExportImage }: Props) {
+export function TopBar({ quality, onQuality, name, hasMap, onOpen, onSave, onExportData, onExportImage }: Props) {
   const fileInput = useRef<HTMLInputElement>(null);
   const [menu, setMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -34,6 +37,14 @@ export function TopBar({ name, hasMap, onOpen, onSave, onExportData, onExportIma
         {hasMap && <em className="wordmark__map">{name}</em>}
       </div>
       <div className="topbar__actions">
+        <label className="quality" title="Lower quality draws faster on slower graphics cards">
+          <span>Quality</span>
+          <select value={quality} onChange={(e) => onQuality(e.target.value as Quality)}>
+            <option value="high">High</option>
+            <option value="balanced">Balanced</option>
+            <option value="fast">Fast</option>
+          </select>
+        </label>
         <button className="btn btn--ghost" onClick={() => fileInput.current?.click()}>
           Open
         </button>

@@ -5,6 +5,8 @@ Two files come out of Cartographer:
 - **Project file** (`.cartomap`): everything needed to reopen a map exactly.
   Gzip-compressed JSON with typed arrays stored as base64. Meant for the app,
   not for games; its internals may grow between versions (`version` field).
+  Version 2 stores the art heightfield as 16-bit integers (about 40% smaller);
+  version 1 files still open.
 - **Game data** (`*-gamedata.json`): a readable, stable export for engines and
   tools. Documented below.
 

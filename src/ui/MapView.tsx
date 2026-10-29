@@ -1,9 +1,12 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
 import type { LoadedMap } from '../state/useMapWorker';
-import { MapRenderer, ZOOM, hexFactor, type MapMode, type View } from '../render/MapRenderer';
+import { MapRenderer, ZOOM, hexFactor, type MapMode, type Quality, type View } from '../render/MapRenderer';
 import { drawLabels } from '../render/LabelLayer';
 import { hexAt } from '../model/hex';
 import { ID_RES } from '../render/assets';
+
+/** Lettering stays crisp whatever the map's render quality. */
+const labelDpr = () => Math.min(window.devicePixelRatio || 1, 2);
 
 export interface Pick {
   hex: number;
@@ -16,9 +19,11 @@ export interface MapViewHandle {
   fit(): void;
   getView(): View;
   snapshot(): Promise<Blob | null>;
+  setUniform(name: string, value: number): void;
 }
 
 interface Props {
+  quality: Quality;
   loaded: LoadedMap | null;
   mode: MapMode;
   selected: Pick | null;
@@ -26,7 +31,7 @@ interface Props {
   onZoom(zoom: number): void;
 }
 
-export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ loaded, mode, selected, onSelect, onZoom }, ref) {
+export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ quality, loaded, mode, selected, onSelect, onZoom }, ref) {
   const wrap = useRef<HTMLDivElement>(null);
   const glCanvas = useRef<HTMLCanvasElement>(null);
   const labelCanvas = useRef<HTMLCanvasElement>(null);
@@ -58,7 +63,7 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ loade
     }
     r.render({ view: view.current, mode: props.current.mode, selectedProvince: props.current.selected?.province ?? -1, hoveredProvince: hover.current });
     const ctx = labelCanvas.current!.getContext('2d')!;
-    drawLabels(ctx, size.current.w, size.current.h, r.renderer.getPixelRatio(), view.current, l.map, l.assets);
+    drawLabels(ctx, size.current.w, size.current.h, labelDpr(), view.current, l.map, l.assets);
     if (Math.abs(view.current.zoom - lastZoomReported.current) > 1e-3) {
       lastZoomReported.current = view.current.zoom;
       props.current.onZoom(view.current.zoom);
@@ -114,17 +119,23 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ loade
       flyTo(fitZoom(), l.map.world.width / 2, l.map.world.height / 2);
     },
     getView: () => ({ ...view.current }),
+    setUniform(name: string, value: number) {
+      renderer.current?.setUniform(name, value);
+      schedule();
+    },
     async snapshot() {
       const r = renderer.current;
       if (!r || !props.current.loaded) return null;
       draw();
       const gl = glCanvas.current!;
+      const lc = labelCanvas.current!;
       const out = document.createElement('canvas');
-      out.width = gl.width;
-      out.height = gl.height;
+      out.width = lc.width;
+      out.height = lc.height;
       const ctx = out.getContext('2d')!;
-      ctx.drawImage(gl, 0, 0);
-      ctx.drawImage(labelCanvas.current!, 0, 0);
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(gl, 0, 0, out.width, out.height);
+      ctx.drawImage(lc, 0, 0);
       return new Promise((res) => out.toBlob((b) => res(b), 'image/png'));
     },
   }));
@@ -137,9 +148,8 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ loade
       const el = wrap.current!;
       size.current = { w: el.clientWidth, h: el.clientHeight };
       r.resize(size.current.w, size.current.h);
-      const dpr = r.renderer.getPixelRatio();
-      labelCanvas.current!.width = Math.round(size.current.w * dpr);
-      labelCanvas.current!.height = Math.round(size.current.h * dpr);
+      labelCanvas.current!.width = Math.round(size.current.w * labelDpr());
+      labelCanvas.current!.height = Math.round(size.current.h * labelDpr());
       view.current = clampView(view.current);
       draw();
     });
@@ -164,6 +174,13 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ loade
   }, [loaded, draw, schedule]);
 
   useEffect(() => schedule(), [mode, selected, schedule]);
+
+  useEffect(() => {
+    const r = renderer.current;
+    if (!r) return;
+    r.setQuality(quality);
+    schedule();
+  }, [quality, schedule]);
 
   // ------------------------------------------------------------ input ---
   useEffect(() => {

@@ -143,7 +143,9 @@ describe('files', () => {
     const back = mapFromJSON(mapToJSON(m));
     expect(hashMap(back)).toBe(hashMap(m));
     expect(back.height.data).toBeInstanceOf(Float32Array);
-    expect(Array.from(back.height.data.slice(0, 50))).toEqual(Array.from(m.height.data.slice(0, 50)));
+    let maxErr = 0;
+    for (let i = 0; i < m.height.data.length; i++) maxErr = Math.max(maxErr, Math.abs(back.height.data[i] - m.height.data[i]));
+    expect(maxErr).toBeLessThan(2e-5);
     expect(back.provinces).toEqual(m.provinces);
   });
 

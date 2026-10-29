@@ -5,7 +5,7 @@ import { FORMAT_ID, FORMAT_VERSION, type MapData } from './types';
  * base64 so the file stays a single self-describing document.
  */
 
-const TA = { Float32Array, Int32Array, Uint8Array, Uint16Array } as const;
+const TA = { Float32Array, Int32Array, Uint8Array, Uint16Array, Int16Array } as const;
 type TAName = keyof typeof TA;
 
 function b64encode(bytes: Uint8Array): string {
@@ -22,8 +22,19 @@ function b64decode(s: string): Uint8Array {
   return out;
 }
 
+/** Heights are stored as 16-bit integers (step ≈ 0.00003, well under a metre). */
+const HEIGHT_Q = 32767;
+
 export function mapToJSON(map: MapData): string {
-  return JSON.stringify(map, (_k, v) => {
+  const src = map.height.data;
+  const q = new Int16Array(src.length);
+  for (let i = 0; i < src.length; i++) {
+    const v = Math.round(Math.max(-1, Math.min(1, src[i])) * HEIGHT_Q);
+    // never let a sliver of sea round up to sea level (0 counts as land)
+    q[i] = src[i] < 0 ? Math.min(-1, v) : v;
+  }
+  const packed = { ...map, version: FORMAT_VERSION, height: { ...map.height, data: q, quantized: HEIGHT_Q } };
+  return JSON.stringify(packed, (_k, v) => {
     if (ArrayBuffer.isView(v) && !(v instanceof DataView)) {
       const name = v.constructor.name as TAName;
       if (name in TA) return { $ta: name, b64: b64encode(new Uint8Array(v.buffer, v.byteOffset, v.byteLength)) };
@@ -42,7 +53,17 @@ export function mapFromJSON(text: string): MapData {
     }
     return v;
   });
-  return validate(obj);
+  const map = validate(obj);
+  // format 2: quantized heightfield
+  const h = map.height as MapData['height'] & { quantized?: number };
+  if (h.quantized) {
+    const qd = h.data as unknown as Int16Array;
+    const out = new Float32Array(qd.length);
+    for (let i = 0; i < qd.length; i++) out[i] = qd[i] / h.quantized;
+    map.height = { w: h.w, h: h.h, res: h.res, data: out };
+  }
+  map.version = FORMAT_VERSION;
+  return map;
 }
 
 export function validate(obj: any): MapData {
