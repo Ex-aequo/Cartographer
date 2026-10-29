@@ -338,7 +338,7 @@ function PaintControls({ layer, settings, onSettings }: { layer: DataLayer; sett
             </span>
             <input type="range" min={0.6} max={20} step={0.2} value={settings.radius} onChange={(e) => set({ radius: Number(e.target.value) })} />
           </label>
-          <p className="hint">{t(def.scope === 'province' ? 'Painting sets the value of every province you touch.' : 'Drag over hexes.')} {t('Values you paint stay when the rules run again.')} {t('Right-drag or hold Space to move the map.')}</p>
+          <p className="hint">{t(def.scope === 'province' ? 'Painting sets the value of every province you touch.' : 'Drag over hexes.')} {t('Values you paint stay when the rules run again.')} {t('Right-drag or hold Space to move the map.')} {t('In 3D, right-drag turns and tilts it; middle-drag or Space moves it.')}</p>
         </>
       )}
     </fieldset>

@@ -637,4 +637,10 @@ export const PT: Record<string, string> = {
   "Coast or inland": "Costa ou interior",
   "By the sea": "Junto ao mar",
   "Inland": "Interior",
+  "Tilt": "Inclinação",
+  "Map rotation": "Rotação do mapa",
+  "Drag to turn the map, click to face north": "Arraste para rodar o mapa, clique para virar a norte",
+  "Back to the flat map": "Voltar ao mapa plano",
+  "Tilt the map and raise the land": "Inclinar o mapa e erguer o relevo",
+  "In 3D, right-drag turns and tilts it; middle-drag or Space moves it.": "Em 3D, o botão direito roda e inclina; o botão do meio ou Espaço movem-no.",
 };

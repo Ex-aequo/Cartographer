@@ -1,3 +1,4 @@
+import { projector } from '../render/camera';
 import type { MapData } from '../model/types';
 import { hexCenterX, hexCenterY } from '../model/hex';
 import type { View } from '../render/MapRenderer';
@@ -16,8 +17,12 @@ export function drawEditOverlay(
   pointer: [number, number] | null,
 ): void {
   const z = view.zoom;
-  const sx = (x: number) => (x - view.cx) * z + cssW / 2;
-  const sy = (y: number) => (y - view.cy) * z + cssH / 2;
+  // everything is drawn on the ground, through the same camera as the map
+  const proj = projector(view, cssW, cssH, map.height);
+  const P = (x: number, y: number): [number, number] => {
+    const r = proj.pt(x, y, proj.ground(x, y));
+    return r ? [r[0], r[1]] : [-1e5, -1e5];
+  };
   const s = session.stroke;
 
   // hexes painted or erased in this stroke (they update for real when the stroke ends)
@@ -43,13 +48,12 @@ export function drawEditOverlay(
     ctx.lineWidth = 1;
     for (const h of s.hexes) {
       const row = Math.floor(h / map.grid.cols);
-      const cx = sx(hexCenterX(h % map.grid.cols, row));
-      const cy = sy(hexCenterY(row));
+      const wx = hexCenterX(h % map.grid.cols, row);
+      const wy = hexCenterY(row);
       ctx.beginPath();
       for (let k = 0; k < 6; k++) {
         const a = (Math.PI / 3) * k + Math.PI / 6;
-        const px = cx + Math.cos(a) * z;
-        const py = cy + Math.sin(a) * z;
+        const [px, py] = P(wx + Math.cos(a), wy + Math.sin(a));
         if (k === 0) ctx.moveTo(px, py);
         else ctx.lineTo(px, py);
       }
@@ -67,7 +71,11 @@ export function drawEditOverlay(
     ctx.strokeStyle = 'rgba(236, 226, 201, 0.85)';
     ctx.lineWidth = 5;
     ctx.beginPath();
-    s.points.forEach(([x, y], k) => (k ? ctx.lineTo(sx(x), sy(y)) : ctx.moveTo(sx(x), sy(y))));
+    s.points.forEach(([x, y], k) => {
+      const [a, b] = P(x, y);
+      if (k) ctx.lineTo(a, b);
+      else ctx.moveTo(a, b);
+    });
     ctx.stroke();
     ctx.strokeStyle = ink;
     ctx.lineWidth = 2.5;
@@ -78,7 +86,8 @@ export function drawEditOverlay(
       // a dot where the drag started: the province that stays
       ctx.fillStyle = ink;
       ctx.beginPath();
-      ctx.arc(sx(s.points[0][0]), sy(s.points[0][1]), 5, 0, Math.PI * 2);
+      const [a, b] = P(s.points[0][0], s.points[0][1]);
+      ctx.arc(a, b, 5, 0, Math.PI * 2);
       ctx.fill();
     }
   }
@@ -86,25 +95,34 @@ export function drawEditOverlay(
   // brush outline
   if (pointer && settings.tool !== 'label') {
     const [px, py] = pointer;
-    const r = settings.tool === 'river' || settings.tool === 'split' || settings.tool === 'merge' ? 0 : settings.radius * z;
+    const wr = settings.tool === 'river' || settings.tool === 'split' || settings.tool === 'merge' ? 0 : settings.radius;
+    const [cx, cy] = P(px, py);
     ctx.lineWidth = 1.5;
-    if (r > 2) {
+    if (wr * z > 2) {
+      // the brush circle lies on the land, so it follows hills and the tilt
+      const ring = (grow: number) => {
+        ctx.beginPath();
+        for (let k = 0; k <= 48; k++) {
+          const a = (k / 48) * Math.PI * 2;
+          const [a0, b0] = P(px + Math.cos(a) * wr, py + Math.sin(a) * wr);
+          const [qx, qy] = grow ? [a0 + (a0 - cx) * (grow / Math.max(1, Math.hypot(a0 - cx, b0 - cy))), b0 + (b0 - cy) * (grow / Math.max(1, Math.hypot(a0 - cx, b0 - cy)))] : [a0, b0];
+          if (k === 0) ctx.moveTo(qx, qy);
+          else ctx.lineTo(qx, qy);
+        }
+        ctx.stroke();
+      };
       ctx.strokeStyle = 'rgba(20, 14, 9, 0.75)';
-      ctx.beginPath();
-      ctx.arc(sx(px), sy(py), r + 1, 0, Math.PI * 2);
-      ctx.stroke();
+      ring(1);
       ctx.strokeStyle = 'rgba(240, 230, 205, 0.95)';
-      ctx.beginPath();
-      ctx.arc(sx(px), sy(py), r, 0, Math.PI * 2);
-      ctx.stroke();
+      ring(0);
     }
     // centre mark
     ctx.strokeStyle = 'rgba(240, 230, 205, 0.95)';
     ctx.beginPath();
-    ctx.moveTo(sx(px) - 5, sy(py));
-    ctx.lineTo(sx(px) + 5, sy(py));
-    ctx.moveTo(sx(px), sy(py) - 5);
-    ctx.lineTo(sx(px), sy(py) + 5);
+    ctx.moveTo(cx - 5, cy);
+    ctx.lineTo(cx + 5, cy);
+    ctx.moveTo(cx, cy - 5);
+    ctx.lineTo(cx, cy + 5);
     ctx.stroke();
   }
 }

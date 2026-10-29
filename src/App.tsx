@@ -16,7 +16,7 @@ import { t, useLang } from './i18n';
 import { ExportDialog, modeLabelOf, type DialogPart } from './ui/ExportDialog';
 import { useEditor } from './state/useEditor';
 import { Inspector } from './ui/Inspector';
-import { Legend, ModeSwitch, Veil, ZoomLadder } from './ui/Controls';
+import { Legend, ModeSwitch, Veil, View3D, ZoomLadder, cameraBus } from './ui/Controls';
 import { TopBar } from './ui/TopBar';
 import { LEVELS } from './ui/zoomLevels';
 import { layerIdOf, type MapMode } from './render/mapModes';
@@ -50,6 +50,7 @@ export function App() {
   };
   const [pick, setPick] = useState<Pick | null>(null);
   const [zoom, setZoom] = useState(1);
+  const camBus = useMemo(() => cameraBus(), []);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState<DialogPart[] | null>(null);
   useEffect(() => {
@@ -194,6 +195,8 @@ export function App() {
       jumpTo: (z: number, x?: number, y?: number) => viewRef.current?.jumpTo(z, x, y),
       setMode,
       setUniform: (n: string, v: number) => viewRef.current?.setUniform(n, v),
+      setCamera: (p: object, animate = false) => viewRef.current?.setCamera(p, animate),
+      camera: () => viewRef.current?.getCamera(),
       select: (p: Pick | null) => setPick(p),
       generate: (p: Partial<GenParams>) => draw({ ...DEFAULT_PARAMS, ...p }),
       editor: () => editor,
@@ -205,7 +208,7 @@ export function App() {
 
   return (
     <div className="app">
-      <MapView ref={viewRef} editor={editor.bridge} toolActive={!!editor.settings.tool || (tab === 'symbols' && !!sym.armed)} revision={editor.revision} quality={quality} loaded={loaded} mode={mode} layerColors={shownColors} badgeLayer={shownLayer?.def.showIcons ? shownLayer : null} symbols={sym.bridge} selected={pick} onSelect={setPick} onZoom={setZoom} />
+      <MapView ref={viewRef} editor={editor.bridge} toolActive={!!editor.settings.tool || (tab === 'symbols' && !!sym.armed)} revision={editor.revision} quality={quality} loaded={loaded} mode={mode} layerColors={shownColors} badgeLayer={shownLayer?.def.showIcons ? shownLayer : null} symbols={sym.bridge} selected={pick} onSelect={setPick} onZoom={setZoom} onCamera={camBus.emit} />
       <TopBar quality={quality} onQuality={changeQuality} name={loaded?.map.meta.params.seed ?? ''} hasMap={!!loaded} onOpen={onOpen} onSave={onSave}
         exports={[
           { label: t('Game data'), hint: t('Hexes, provinces, realms and layers as JSON'), run: onExportData },
@@ -328,6 +331,7 @@ export function App() {
               else viewRef.current?.flyTo(LEVELS[i].target);
             }}
             onStep={(f) => viewRef.current?.flyTo(zoom * f)}
+            top={<View3D bus={camBus} onChange={(p, a) => viewRef.current?.setCamera(p, a)} />}
           />
           <ModeSwitch mode={mode} onMode={setMode} layers={layers.map((l) => ({ id: l.def.id, name: l.def.name }))} hasRaces={!!loaded?.map.realms.some((r) => r.race && !r.retired)} />
           <Legend mode={mode} present={presentCodes} layer={shownLayer} races={(loaded?.map.meta.params.races ?? []).filter((r) => loaded?.map.realms.some((x) => x.race === r.id && !x.retired))} />

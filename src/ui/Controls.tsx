@@ -1,12 +1,15 @@
 import { t } from '../i18n';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { DEFAULT_CAMERA, MAX_TILT, wrapAngle, type Camera3D } from '../render/camera';
 import { MODES, categoriesFor, isLayerMode, modeDef, rampFor, type MapMode } from '../render/mapModes';
 import { formatValue, numberRange, type DataLayer } from '../model/layers';
 import { LEVELS, levelIndexFor } from './zoomLevels';
 
-export function ZoomLadder({ zoom, onLevel, onStep }: { zoom: number; onLevel(i: number): void; onStep(f: number): void }) {
+export function ZoomLadder({ zoom, onLevel, onStep, top }: { zoom: number; onLevel(i: number): void; onStep(f: number): void; top?: ReactNode }) {
   const active = levelIndexFor(zoom);
   return (
     <nav className="ladder" aria-label={t('Zoom level')}>
+      {top}
       <button className="ladder__step" onClick={() => onStep(1.5)} aria-label={t('Zoom in')}>
         +
       </button>
@@ -141,6 +144,117 @@ export function Veil({ step, fraction }: { step: string; fraction: number }) {
         <div className="veil__bar">
           <span style={{ transform: `scaleX(${Math.max(0.04, fraction)})` }} />
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** A tiny broadcast so the compass follows the camera without re-rendering the whole app. */
+export function cameraBus() {
+  let last: Camera3D = { ...DEFAULT_CAMERA };
+  const subs = new Set<(c: Camera3D) => void>();
+  return {
+    emit(c: Camera3D) {
+      last = c;
+      subs.forEach((f) => f(c));
+    },
+    subscribe(f: (c: Camera3D) => void) {
+      subs.add(f);
+      return () => void subs.delete(f);
+    },
+    get: () => last,
+  };
+}
+export type CameraBus = ReturnType<typeof cameraBus>;
+
+const deg = (r: number) => Math.round((r * 180) / Math.PI);
+
+/**
+ * The 3D switch, with a compass you can drag to turn the map (a click turns
+ * it back to north) and sliders for the tilt and the height of the land.
+ */
+export function View3D({ bus, onChange }: { bus: CameraBus; onChange(patch: Partial<Camera3D>, animate: boolean): void }) {
+  const [cam, setCam] = useState(bus.get());
+  useEffect(() => bus.subscribe(setCam), [bus]);
+  const ring = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ a0: number; rot0: number; moved: boolean } | null>(null);
+  const angleOf = (e: React.PointerEvent) => {
+    const r = ring.current!.getBoundingClientRect();
+    return Math.atan2(e.clientY - (r.top + r.height / 2), e.clientX - (r.left + r.width / 2));
+  };
+  return (
+    <div className={`view3d ${cam.on ? 'is-on' : ''}`}>
+      {cam.on && (
+        <div className="view3d__sliders">
+          <label>
+            <span>
+              {t('Tilt')} <b>{deg(cam.tilt)}°</b>
+            </span>
+            <input type="range" min={0} max={deg(MAX_TILT)} step={1} value={deg(cam.tilt)} onChange={(e) => onChange({ tilt: (Number(e.target.value) * Math.PI) / 180 }, false)} />
+          </label>
+          <label>
+            <span>
+              {t('Relief')} <b>{Math.round(cam.height * 100)}%</b>
+            </span>
+            <input type="range" min={0} max={200} step={5} value={Math.round(cam.height * 100)} onChange={(e) => onChange({ height: Number(e.target.value) / 100 }, false)} />
+          </label>
+        </div>
+      )}
+      <div className="view3d__row">
+        {cam.on && (
+          <div
+            ref={ring}
+            className="compass"
+            role="slider"
+            aria-label={t('Map rotation')}
+            aria-valuemin={-180}
+            aria-valuemax={180}
+            aria-valuenow={deg(cam.rot)}
+            tabIndex={0}
+            title={t('Drag to turn the map, click to face north')}
+            onKeyDown={(e) => {
+              if (e.key === 'ArrowLeft') onChange({ rot: wrapAngle(cam.rot - 0.2) }, false);
+              else if (e.key === 'ArrowRight') onChange({ rot: wrapAngle(cam.rot + 0.2) }, false);
+              else if (e.key === 'Enter' || e.key === ' ') onChange({ rot: 0 }, true);
+              else return;
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            onPointerDown={(e) => {
+              e.currentTarget.setPointerCapture(e.pointerId);
+              drag.current = { a0: angleOf(e), rot0: cam.rot, moved: false };
+            }}
+            onPointerMove={(e) => {
+              const d = drag.current;
+              if (!d) return;
+              const da = wrapAngle(angleOf(e) - d.a0);
+              if (Math.abs(da) > 0.04) d.moved = true;
+              if (d.moved) onChange({ rot: wrapAngle(d.rot0 - da) }, false);
+            }}
+            onPointerUp={() => {
+              const d = drag.current;
+              drag.current = null;
+              if (d && !d.moved) onChange({ rot: 0 }, true);
+            }}
+          >
+            <svg viewBox="-30 -30 60 60" aria-hidden>
+              <circle r="27" className="compass__ring" />
+              {[0, 1, 2, 3, 4, 5, 6, 7].map((k) => (
+                <line key={k} className="compass__tick" x1="0" y1="-27" x2="0" y2={k % 2 ? -24 : -21} transform={`rotate(${k * 45})`} />
+              ))}
+              <g transform={`rotate(${-deg(cam.rot)})`}>
+                <path className="compass__north" d="M0 -20 L5 0 L0 -3 L-5 0 Z" />
+                <path className="compass__south" d="M0 20 L5 0 L0 3 L-5 0 Z" />
+                <text className="compass__n" y="-21.5" textAnchor="middle" dominantBaseline="auto">
+                  N
+                </text>
+              </g>
+            </svg>
+          </div>
+        )}
+        <button className={`view3d__toggle ${cam.on ? 'is-on' : ''}`} aria-pressed={cam.on} onClick={() => onChange({ on: !cam.on }, true)} title={cam.on ? t('Back to the flat map') : t('Tilt the map and raise the land')}>
+          3D
+        </button>
       </div>
     </div>
   );

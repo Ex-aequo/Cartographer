@@ -1,6 +1,6 @@
 {
   "name": "cartographer",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Standalone fantasy map generator with CK3-style rendering and game-ready data layers",
   "scripts": {
     "dev": "vite",

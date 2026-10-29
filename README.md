@@ -58,6 +58,17 @@ Requires Node 20 or newer and a browser with WebGL 2.
   and their names), Province (provinces, towns, farmland), Hex (individual
   hexes). Scroll, pinch or use + and − to move between them; the paper map
   crossfades into terrain, and at Hex level borders snap onto hex edges.
+- **3D** (button above the zoom levels): tilts the map and raises the land, at
+  every zoom. The World map stays a flat sheet of paper (tilted, no relief);
+  relief rises as the terrain appears. Turn the map by dragging the compass
+  (a click faces north again), with right-drag or Ctrl/⌘ + drag (sideways
+  turns, up and down tilts), with Q and E, or with a two-finger twist. The
+  sliders set the tilt (0–62°) and the height of the land (0–200 %). Names
+  lie on the land and turn with it; towns and symbols stand up. Every tool
+  works in 3D: brushes, lines and clicks land on the hill under the cursor.
+  Middle-drag or Space + drag moves the map while a tool is active.
+  *Image of this view* saves the 3D view; the high-resolution and game
+  exports are always top-down.
 - **Map modes** (bottom): Political shows realm colours; Physical shows the land
   alone. Elevation, Temperature, Rainfall, Biome and Terrain type show the
   exact game value of every hex, with a legend.
@@ -160,7 +171,7 @@ While a tool is active, right-drag or hold Space to move the map.
 | --- | --- | --- |
 | Generator | `src/gen/` | Seeded heightfield (templates, ranges, domain warp), droplet hydraulic erosion, wind-driven rainfall, priority-flood drainage, rivers and lakes, Whittaker-style biomes, provinces by weighted growth, regions and realms by graph clustering, culture-flavoured names. Runs in a Web Worker. |
 | Data model | `src/model/` | Pointy-top odd-r hex grid, typed-array layers, versioned project format, game export. |
-| Renderer | `src/render/` | Three.js with one full-screen GLSL shader: paper and terrain looks, biome colour, slope-following gully relief, tree canopy, farmland, water, analytic smooth borders, data map modes, meandering river ribbons, canvas lettering with collision checks. |
+| Renderer | `src/render/` | Three.js with one full-screen GLSL shader (in 3D each pixel marches a ray down onto the heightfield; `camera.ts` does the same on the CPU for lettering, symbols and clicks): paper and terrain looks, biome colour, slope-following gully relief, tree canopy, farmland, water, analytic smooth borders, data map modes, meandering river ribbons, canvas lettering with collision checks. |
 | Editing | `src/edit/`, `src/gen/rederive.ts` | Brushes work on the heightfield and edit layers in place (live redraw while dragging); each stroke is one undo step stored as a diff. A deterministic rebuild in the worker re-derives everything from heightfield + edits and repairs the political map without renumbering ids. |
 | Exports | `src/export/`, `src/worker/exportWorker.ts` | Tiled high-resolution rendering with a second offscreen renderer; province ID image with generated sea zones, heightmaps, masks and tables built in a worker; an exact PNG encoder (8/16-bit) and a zip writer with no dependencies. |
 | UI | `src/ui/`, `src/i18n/` | React. Interface strings are written in English and looked up in `src/i18n/pt.ts`; a test fails if any string shown in the interface has no translation. |
@@ -189,4 +200,5 @@ clicks always land on the province you see.
 4. **Phase 4 (done)**: full export set (tiled high-resolution
    images, province ID image with sea zones, heightmaps and masks, CSV) and
    the desktop app.
-5. **0.5 (this release)**: races with homeland biases.
+5. **0.5 (done)**: races with homeland biases.
+6. **0.6 (this release)**: 3D view with turn, tilt and relief, full editing in 3D.

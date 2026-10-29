@@ -14,6 +14,15 @@ out vec4 fragColor;
 uniform vec2 uViewport;      // device px
 uniform vec2 uCenter;        // world units
 uniform float uZoom;         // device px per world unit
+uniform float u3D;           // 1 = perspective camera with relief
+uniform vec3 uCamPos;        // world units, z up
+uniform vec3 uCamR;          // camera right, up, forward (unit vectors)
+uniform vec3 uCamUp;
+uniform vec3 uCamF;
+uniform float uFocal;        // device px from eye to screen
+uniform float uReliefH;      // world units of height for elevation 1
+uniform float uMarchSteps;
+float gZoom;                 // device px per world unit at this pixel
 uniform float uPixelRatio;
 uniform vec2 uWorld;         // world size, units
 
@@ -103,7 +112,7 @@ float hash12(vec2 p) { return hash22(p).x; }
 
 // Octave weight that removes detail smaller than ~3 px (prevents shimmer).
 float lod(float freq) {
-  float pxPerCycle = uZoom / (freq * uPixelRatio);
+  float pxPerCycle = gZoom / (freq * uPixelRatio);
   return smoothstep(3.0, 8.0, pxPerCycle);
 }
 
@@ -380,18 +389,18 @@ vec3 fields(vec2 p, vec3 ground, float tempC, float moist) {
   // block colour when single strips are too small to see
   float bcrop = bh.y;
   vec3 bc = mix(ground, bcrop < 0.4 ? wheat : (bcrop < 0.75 ? green : young), 0.6);
-  cc = mix(bc, cc, smoothstep(5.0, 10.0, stripW * uZoom / uPixelRatio));
+  cc = mix(bc, cc, smoothstep(5.0, 10.0, stripW * gZoom / uPixelRatio));
   // hedgerows around blocks and parishes, furrows between strips
   vec2 bf = fract(block);
   vec2 be = min(bf, 1.0 - bf) * vec2(0.9, 0.62);
   float edge = min(min(be.x, be.y), parEdge);
   float hedge = 1.0 - smoothstep(0.0, 0.025, edge);
   float furrow = 1.0 - smoothstep(0.0, 0.1, min(sf, 1.0 - sf));
-  cc = mix(cc, cc * 0.88, furrow * smoothstep(7.0, 14.0, stripW * uZoom / uPixelRatio) * 0.6);
-  cc = mix(cc, vec3(0.22, 0.28, 0.16), hedge * smoothstep(14.0, 30.0, uZoom / uPixelRatio) * 0.75);
+  cc = mix(cc, cc * 0.88, furrow * smoothstep(7.0, 14.0, stripW * gZoom / uPixelRatio) * 0.6);
+  cc = mix(cc, vec3(0.22, 0.28, 0.16), hedge * smoothstep(14.0, 30.0, gZoom / uPixelRatio) * 0.75);
   // far away: a soft patchwork tint
   vec3 avg = mix(ground, vec3(0.66, 0.63, 0.38), 0.5);
-  return mix(avg, cc, smoothstep(3.0, 8.0, 0.75 * uZoom / uPixelRatio));
+  return mix(avg, cc, smoothstep(3.0, 8.0, 0.75 * gZoom / uPixelRatio));
 }
 
 // ----------------------------------------------------------- the looks ---
@@ -460,7 +469,7 @@ vec3 terrainLook(vec2 p, float h, float h0, vec3 N, float tempC, float moist, fl
   vec3 treeBase = mix(vec3(0.20, 0.29, 0.15), vec3(0.15, 0.24, 0.16), smoothstep(5.0, -5.0, tempC));
   treeBase = mix(treeBase, vec3(0.13, 0.27, 0.12), smoothstep(20.0, 26.0, tempC));
   const float CELL = 0.085;
-  float crownPx = CELL * uZoom;
+  float crownPx = CELL * gZoom;
   float detailVis = smoothstep(2.2, 4.5, crownPx);
   vec3 farForest = treeBase * 1.05 * (0.92 + 0.1 * grain);
   c = mix(c, farForest, fd * 0.85 * (1.0 - detailVis));
@@ -549,7 +558,7 @@ vec3 paperLook(vec2 p, float h, vec3 N, float tempC, float moist, float coastDis
   c *= 1.0 + max(0.0, lit - 1.0) * 0.12;
 
   // engraved hatching in mountain shadows (world-anchored, constant 4–8 px pitch)
-  float L = log2(uZoom / 5.0);
+  float L = log2(gZoom / 5.0);
   float f0 = exp2(floor(L));
   float t = fract(L);
   vec2 hp = vec2(p.x + p.y, p.x - p.y) * 0.7071;
@@ -561,7 +570,7 @@ vec3 paperLook(vec2 p, float h, vec3 N, float tempC, float moist, float coastDis
   c = mix(c, c * vec3(0.5, 0.42, 0.34), cross * shade2 * 0.6);
 
   // forests as stippled dots
-  float sL = log2(uZoom / 9.0);
+  float sL = log2(gZoom / 9.0);
   float sf0 = exp2(floor(sL));
   float st = fract(sL);
   float dots = 0.0;
@@ -710,10 +719,57 @@ void owners(vec2 p, out Owner prov, out Owner realm, out Owner region) {
   region = tally(gid, ws, gs, n);
 }
 
+// Where the view ray of this pixel meets the land (perspective + relief).
+vec2 castRay(vec2 frag, out float dist) {
+  vec3 d = normalize(uCamF * uFocal + uCamR * frag.x + uCamUp * frag.y);
+  vec3 o = uCamPos;
+  if (d.z > -1e-4) {
+    dist = 1e6;
+    return vec2(-1e6);
+  }
+  float tBot = -o.z / d.z;
+  if (uReliefH <= 0.0) {
+    dist = tBot;
+    return o.xy + d.xy * tBot;
+  }
+  float tTop = max(0.0, (uReliefH - o.z) / d.z);
+  float prev = tTop;
+  float hitT = tBot;
+  int n = int(uMarchSteps);
+  for (int k = 1; k <= 96; k++) {
+    if (k > n) break;
+    float t = tTop + (tBot - tTop) * float(k) / float(n);
+    vec3 q = o + d * t;
+    float gz = max(texture(tHeight, q.xy / uHeightSpan).r, 0.0) * uReliefH;
+    if (q.z <= gz) {
+      float lo = prev, hi = t;
+      for (int i = 0; i < 7; i++) {
+        float mid = 0.5 * (lo + hi);
+        vec3 m = o + d * mid;
+        if (m.z > max(texture(tHeight, m.xy / uHeightSpan).r, 0.0) * uReliefH) lo = mid;
+        else hi = mid;
+      }
+      hitT = hi;
+      break;
+    }
+    prev = t;
+  }
+  dist = hitT;
+  return o.xy + d.xy * hitT;
+}
+
 void main() {
   vec2 frag = gl_FragCoord.xy - uViewport * 0.5;
-  vec2 p = uCenter + vec2(frag.x, -frag.y) / uZoom;
-  float pxWorld = 1.0 / uZoom; // world units per device px
+  vec2 p;
+  if (u3D > 0.5) {
+    float dist;
+    p = castRay(frag, dist);
+    gZoom = uFocal / max(dist, 1e-3);
+  } else {
+    gZoom = uZoom;
+    p = uCenter + vec2(frag.x, -frag.y) / gZoom;
+  }
+  float pxWorld = 1.0 / gZoom; // world units per device px
 
   // ---- the desk outside the sheet
   vec2 inside = min(p, uWorld - p);
@@ -759,7 +815,7 @@ void main() {
   vec3 col;
   vec3 N = vec3(0.0, 0.0, 1.0);
   if (paperMix < 0.999) {
-    float ex = mix(4.2, 2.6, smoothstep(5.0, 40.0, uZoom / uPixelRatio));
+    float ex = mix(4.2, 2.6, smoothstep(5.0, 40.0, gZoom / uPixelRatio));
     N = normalFrom(hg, h < 0.0 ? ex * 0.4 : ex);
     col = terrainLook(p, h, h0, N, tempC, moist, coastDist);
   }
@@ -816,8 +872,8 @@ void main() {
   }
 
   // ---- province borders: hairlines, stronger when zoomed in
-  float provPx = provDist * uZoom;
-  float zc = uZoom / uPixelRatio;
+  float provPx = provDist * gZoom;
+  float zc = gZoom / uPixelRatio;
   float provVis = smoothstep(2.0, 6.0, zc) * landA;
   float provLine = lineAA(provPx, 0.5 * uPixelRatio) * provVis;
   vec3 provInk = mix(vec3(0.12, 0.10, 0.08), vec3(0.35, 0.26, 0.18), paperMix);
@@ -826,16 +882,16 @@ void main() {
   col = mix(col, provInk, provLine * mix(provA, 0.35, paperMix));
 
   // ---- region (duchy) borders: between province and realm weight
-  float regionVis = smoothstep(3.0, 6.0, uZoom / uPixelRatio) * (1.0 - smoothstep(30.0, 60.0, uZoom / uPixelRatio)) * landA;
+  float regionVis = smoothstep(3.0, 6.0, gZoom / uPixelRatio) * (1.0 - smoothstep(30.0, 60.0, gZoom / uPixelRatio)) * landA;
   if (regionVis > 0.0 && regionDist < realmDist - 0.01) {
-    float rpx = regionDist * uZoom;
+    float rpx = regionDist * gZoom;
     float rline = lineAA(rpx, 1.05 * uPixelRatio) * regionVis;
     col = mix(col, mix(vec3(0.12, 0.09, 0.06), vec3(0.28, 0.19, 0.12), paperMix), rline * 0.72);
   }
 
   // ---- realm borders: thick, two-tone (each side draws its own colour)
-  float realmPx = realmDist * uZoom;
-  float rw = (1.4 + 0.9 * smoothstep(3.0, 30.0, uZoom / uPixelRatio)) * uPixelRatio;
+  float realmPx = realmDist * gZoom;
+  float rw = (1.4 + 0.9 * smoothstep(3.0, 30.0, gZoom / uPixelRatio)) * uPixelRatio;
   float realmLine = lineAA(realmPx, rw) * landA;
   if (realm > 0.5 && realmLine > 0.0) {
     vec3 rc = realmColor(realm);
@@ -860,7 +916,7 @@ void main() {
 
   // ---- hex grid at the closest zoom
   if (uHexGrid > 0.0) {
-    float he = hexEdgeDist(p) * uZoom;
+    float he = hexEdgeDist(p) * gZoom;
     float g = lineAA(he, 0.5 * uPixelRatio) * uHexGrid;
     // ink on light ground, chalk on dark forest
     float lum = dot(col, vec3(0.299, 0.587, 0.114));
@@ -869,7 +925,7 @@ void main() {
   }
 
   // ---- sheet edge: aged darkening on paper, thin frame line
-  float edgePx = edgeIn * uZoom;
+  float edgePx = edgeIn * gZoom;
   col *= mix(1.0, 0.82 + 0.18 * smoothstep(0.0, 18.0, edgeIn), paperMix);
   col = mix(col, vec3(0.22, 0.16, 0.11), lineAA(abs(edgePx - 7.0 * uPixelRatio), 0.6 * uPixelRatio) * paperMix * 0.7);
 
