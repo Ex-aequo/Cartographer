@@ -11,6 +11,8 @@ import { TOOL_LABELS } from '../src/edit/session';
 import { MODES, ELEVATION_RAMP, TEMPERATURE_RAMP, RAINFALL_RAMP } from '../src/render/mapModes';
 import { LEVELS } from '../src/ui/zoomLevels';
 import { LOOKS } from '../src/export/highres';
+import { RACE_PRESETS } from '../src/model/races';
+import { COAST_NAMES, SIZE_NAMES, STYLE_NAMES } from '../src/ui/RacesSection';
 
 /** Arguments of every call to `fn(` in the source, split at top-level commas. */
 function allArgs(src: string, fn: string): string[][] {
@@ -84,6 +86,10 @@ export function allKeys(): Set<string> {
     ...LEVELS.flatMap((l) => [l.name, l.hint]),
     ...LOOKS.flatMap((l) => [l.name, l.hint]),
     INK_SET.name,
+    ...RACE_PRESETS.map((r) => r.name),
+    ...Object.values(STYLE_NAMES),
+    ...Object.values(SIZE_NAMES),
+    ...Object.values(COAST_NAMES),
     ...INK_ASSETS.flatMap((a) => [a.name, ...a.tags]),
     'Raising continents',
     'Carving valleys',

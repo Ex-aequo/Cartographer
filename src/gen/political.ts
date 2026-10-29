@@ -1,9 +1,10 @@
+import { activeRaces, kingdomCounts, makeupOf, suitability, SIZE_STRENGTH, type RaceDef } from '../model/races';
 import type { Culture, GenParams, HexLayers, Province, Realm, Region, River } from '../model/types';
 import { HexFlag, Relief, Terrain } from '../model/types';
 import { hexCenterX, hexCenterY, type Grid } from '../model/hex';
 import { MinHeap } from '../util/heap';
 import { Rng } from '../util/rng';
-import { makeCulture, NameForge, PALETTE_COUNT, type NameCulture } from './names';
+import { makeCulture, NameForge, paletteIndexOf, PALETTE_COUNT, type NameCulture } from './names';
 
 const HEX_AREA = 2.598;
 
@@ -79,16 +80,41 @@ export function buildPolitical(p: GenParams, grid: Grid, hex: HexLayers, nbr: In
   // ---------- Realms ----------
   const realmRng = rng.fork('realms');
   const strength = Array.from({ length: Math.max(p.realmCount, 1) }, () => realmRng.range(0.55, 1.7));
-  const realmOf = clusterGraph(
-    regionCenters,
-    regionNb.map((s) => [...s]),
-    regionSea.map((s) => [...s]),
-    Math.min(p.realmCount, regions.length),
-    Infinity,
-    regions.map(() => 1),
-    strength,
-    realmRng,
-  );
+  const races = activeRaces(p.races);
+  let realmOf: number[];
+  /** race id per final realm id */
+  const realmRace = new Map<number, string>();
+  if (!races.length) {
+    realmOf = clusterGraph(
+      regionCenters,
+      regionNb.map((s) => [...s]),
+      regionSea.map((s) => [...s]),
+      Math.min(p.realmCount, regions.length),
+      Infinity,
+      regions.map(() => 1),
+      strength,
+      realmRng,
+    );
+  } else {
+    const plan = planRaceRealms(races, regions, provinces, hex, regionCenters, Math.min(p.realmCount, regions.length), rng.fork('races'));
+    const st = plan.seeds.map((_, k) => (k < plan.slotRace.length ? SIZE_STRENGTH[plan.slotRace[k].size] : strength[k % strength.length]));
+    realmOf = clusterGraph(
+      regionCenters,
+      regionNb.map((s) => [...s]),
+      regionSea.map((s) => [...s]),
+      plan.seeds.length,
+      Infinity,
+      regions.map(() => 1),
+      st,
+      realmRng,
+      plan.seeds,
+      (k, j) => (k < plan.slotRace.length ? raceCost(plan.suit.get(plan.slotRace[k].id)![j]) : 1),
+      (k) => (k < plan.slotRace.length ? Math.max(1, Math.round((regions.length / plan.seeds.length) * SIZE_CAP[plan.slotRace[k].size])) : Infinity),
+    );
+    plan.seeds.forEach((s, k) => {
+      if (k < plan.slotRace.length) realmRace.set(realmOf[s], plan.slotRace[k].id);
+    });
+  }
   const realmCount = Math.max(...realmOf) + 1;
 
   // ---------- Cultures ----------
@@ -113,11 +139,29 @@ export function buildPolitical(p: GenParams, grid: Grid, hex: HexLayers, nbr: In
   const forge = new NameForge(rng.fork('names'));
   const cultures: Culture[] = nameCultures.map((c, id) => ({ id, name: forge.word(c, 2, 2, 0), palette: paletteOrder[id % PALETTE_COUNT] }));
 
+  // races with a name style of their own get their own culture
+  if (realmRace.size) {
+    const raceCulture = new Map<string, number>();
+    for (const race of races) {
+      if (race.names === 'auto') continue;
+      const pal = paletteIndexOf(race.names);
+      const id = cultures.length;
+      nameCultures.push(makeCulture(cultureRng, pal));
+      cultures.push({ id, name: race.name, palette: pal });
+      raceCulture.set(race.id, id);
+    }
+    realmRace.forEach((raceId, realm) => {
+      const c = raceCulture.get(raceId);
+      if (c !== undefined) realmCulture[realm] = c;
+    });
+  }
+
   const realms: Realm[] = Array.from({ length: realmCount }, (_, id) => ({
     id,
     name: '',
     title: '',
     culture: realmCulture[id],
+    ...(realmRace.has(id) ? { race: realmRace.get(id) } : {}),
     color: [0, 0, 0],
     regions: [],
     capitalProvince: -1,
@@ -161,6 +205,85 @@ export function buildPolitical(p: GenParams, grid: Grid, hex: HexLayers, nbr: In
 }
 
 // ---------------------------------------------------------------------------
+
+/**
+ * Where each race's kingdoms start: on the regions that suit the race best,
+ * spread apart from one another; the remaining (unaligned) realms start as
+ * far as possible from all of them.
+ */
+function planRaceRealms(races: RaceDef[], regions: Region[], provinces: Province[], hex: HexLayers, centers: [number, number][], total: number, rng: Rng) {
+  const counts = kingdomCounts(races, total);
+  const makeups = regions.map((rg) => makeupOf({ hex }, rg.provinces.flatMap((k) => provinces[k].hexes)));
+  const suit = new Map<string, number[]>();
+  for (const race of races) suit.set(race.id, makeups.map((mk) => suitability(race, mk)));
+  // strictest races choose first, so a scarce terrain goes to whoever needs it most
+  const order = [...races].sort((a, b) => strictness(b) - strictness(a));
+  const slotRace: RaceDef[] = [];
+  for (const race of order) for (let k = 0; k < (counts.get(race.id) ?? 0); k++) slotRace.push(race);
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const c of centers) {
+    minX = Math.min(minX, c[0]);
+    maxX = Math.max(maxX, c[0]);
+    minY = Math.min(minY, c[1]);
+    maxY = Math.max(maxY, c[1]);
+  }
+  const spacing = Math.sqrt(((maxX - minX) * (maxY - minY)) / Math.max(1, total)) * 0.75;
+  // a homeland needs room: small islands make poor seeds
+  const avgLand = makeups.reduce((a, mk) => a + mk.land, 0) / Math.max(1, makeups.length);
+  const roomy = makeups.map((mk) => Math.min(1, mk.land / (avgLand * 0.8)) ** 1.5);
+  const seeds: number[] = [];
+  const taken = new Set<number>();
+  for (const race of slotRace) {
+    const sv = suit.get(race.id)!;
+    let best = -1;
+    let bs = -Infinity;
+    for (let j = 0; j < regions.length; j++) {
+      if (taken.has(j)) continue;
+      let dmin = Infinity;
+      for (const s of seeds) dmin = Math.min(dmin, Math.sqrt(dist2(centers[s], centers[j])));
+      const spread = seeds.length ? Math.min(1, dmin / spacing) : 1;
+      const score = Math.min(sv[j], 1.2) * roomy[j] * (0.35 + 0.65 * spread) + rng.range(0, 0.02);
+      if (score > bs) {
+        bs = score;
+        best = j;
+      }
+    }
+    if (best < 0) break;
+    seeds.push(best);
+    taken.add(best);
+  }
+  slotRace.length = seeds.length;
+  // unaligned realms: farthest from everything chosen so far
+  while (seeds.length < total) {
+    let best = -1;
+    let bd = -1;
+    for (let j = 0; j < regions.length; j++) {
+      if (taken.has(j)) continue;
+      let dmin = Infinity;
+      for (const s of seeds) dmin = Math.min(dmin, dist2(centers[s], centers[j]));
+      if (dmin > bd) {
+        bd = dmin;
+        best = j;
+      }
+    }
+    if (best < 0) break;
+    seeds.push(best);
+    taken.add(best);
+  }
+  return { seeds, slotRace, suit };
+}
+
+/** Largest race kingdom, in regions, as a multiple of the average realm. */
+const SIZE_CAP = { small: 0.7, medium: 1.3, large: 2.4 } as const;
+
+/** Crossing land the race likes costs a little less than usual; land it dislikes costs much more. */
+function raceCost(suit: number): number {
+  return suit >= 1 ? 0.85 : 0.85 + 2.4 * (1 - suit);
+}
+
+function strictness(r: RaceDef): number {
+  return r.biases.reduce((a, b) => a + (b.op === 'min' ? b.pct : 0), 0);
+}
 
 /** Centre, dominant terrain, coast flag and settlement hex of a province.
  *  The settlement stays where it was (`keepCapital`) while that hex is still inside. */
@@ -432,10 +555,13 @@ function clusterGraph(
   nodeCost: number[],
   strength: number[] | null,
   rng: Rng,
+  seedsIn?: number[],
+  costMult?: (cluster: number, node: number) => number,
+  maxSizeOf?: (cluster: number) => number,
 ): number[] {
   const m = centers.length;
   if (m === 0) return [];
-  let seeds = farthestPoints(centers, Math.min(targetCount, m), rng);
+  let seeds = seedsIn ?? farthestPoints(centers, Math.min(targetCount, m), rng);
   let of: number[] = [];
   const grow = () => {
     // Costs are tracked per (cluster, node) so that when a cluster is full
@@ -456,7 +582,7 @@ function clusterGraph(
       const k = Math.floor(item / m);
       const i = item - k * m;
       if (assigned[i] || c0 > cost[item]) continue;
-      if (size[k] >= maxSize) continue;
+      if (size[k] >= (maxSizeOf ? maxSizeOf(k) : maxSize)) continue;
       assigned[i] = 1;
       of[i] = k;
       size[k]++;
@@ -464,7 +590,7 @@ function clusterGraph(
       const relax = (j: number, mult: number) => {
         if (assigned[j]) return;
         const d = Math.sqrt(dist2(centers[i], centers[j]));
-        const c = c0 + (d * mult * nodeCost[j] * rng.range(0.92, 1.08)) / st;
+        const c = c0 + (d * mult * nodeCost[j] * rng.range(0.92, 1.08) * (costMult ? costMult(k, j) : 1)) / st;
         if (c < cost[k * m + j]) {
           cost[k * m + j] = c;
           heap.push(k * m + j, c);

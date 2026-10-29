@@ -1436,3 +1436,132 @@ input[type='color']::-moz-color-swatch {
   font-size: 15.5px;
   padding: 2px 5px 4px;
 }
+
+/* -------------------------------------------------------------- races ---- */
+.race-list {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+}
+.race-list li {
+  border: 1px solid transparent;
+  border-radius: var(--r);
+  margin-bottom: 2px;
+}
+.race-list li.is-on {
+  border-color: rgba(184, 146, 79, 0.28);
+  background: rgba(184, 146, 79, 0.07);
+}
+.race-row {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 6px;
+}
+.race-row input[type='checkbox'] {
+  width: auto;
+  accent-color: var(--brass);
+}
+.race-row__name {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--vellum);
+  font: inherit;
+  font-size: 14.5px;
+  text-align: left;
+  cursor: pointer;
+  padding: 2px 0;
+}
+.race-row__name small {
+  color: var(--vellum-dim);
+  font-size: 11.5px;
+  line-height: 1.25;
+  max-width: 100%;
+}
+.race-row__count {
+  color: var(--vellum-dim);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.race-edit {
+  padding: 6px 8px 8px;
+  border-top: 1px dashed rgba(184, 146, 79, 0.3);
+}
+.race-edit .field {
+  margin-bottom: 8px;
+}
+.race-edit .field__row .field {
+  flex: 1;
+}
+.race-edit select,
+.race-report select {
+  width: 100%;
+  padding: 4px 6px;
+  background: rgba(14, 10, 7, 0.45);
+  border: 1px solid rgba(184, 146, 79, 0.3);
+  border-radius: var(--r);
+  color: var(--vellum);
+  font: inherit;
+  font-size: 13.5px;
+}
+.race-edit .num input {
+  width: 100%;
+  padding: 4px 6px;
+}
+.field--color {
+  flex: 0 0 auto !important;
+}
+.bias {
+  margin: 4px 0 8px;
+  padding-left: 8px;
+  border-left: 2px solid var(--brass-dim);
+}
+.bias__head {
+  display: grid;
+  grid-template-columns: 1fr 70px auto 22px;
+  gap: 5px;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.race-report {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(184, 146, 79, 0.2);
+}
+.race-report ul {
+  list-style: none;
+  margin: 4px 0 8px;
+  padding: 0;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.race-report li {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 6px;
+  align-items: center;
+  font-size: 13px;
+  padding: 1px 0;
+}
+.race-report__res {
+  display: flex;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.race-report li.ok .race-report__res {
+  color: #a9c28a;
+}
+.race-report li.miss .race-report__res {
+  color: #e2a497;
+}
+.btn--sticky {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  box-shadow: 0 -8px 14px rgba(30, 22, 16, 0.9);
+}

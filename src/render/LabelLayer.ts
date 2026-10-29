@@ -128,11 +128,11 @@ export function drawLabels(
       const custom = settlementAsset(map, p.id, cap ? 'capital' : seats.has(p.id) ? 'seat' : 'town');
       const asset = custom ? assetById(map, custom) : undefined;
       let hs = 6 * sc;
-      if (asset && st) {
+      if (asset) {
         // the user's own town mark, centred on the town like the keep
-        const w = 15 * sc * st.scale;
+        const w = 15 * sc * (st?.scale ?? 1.8);
         const h = (w * asset.h) / Math.max(1, asset.w);
-        const pic = pictureFor(asset, w * dpr, null, st.ink);
+        const pic = pictureFor(asset, w * dpr, null, st?.ink ?? false);
         if (pic) ctx.drawImage(pic, sx - w / 2, sy - h / 2, w, h);
         hs = Math.max(w, h) / 2;
       } else drawKeep(ctx, sx, sy, sc, cap);

@@ -32,12 +32,12 @@ export function ZoomLadder({ zoom, onLevel, onStep }: { zoom: number; onLevel(i:
   );
 }
 
-export function ModeSwitch({ mode, onMode, layers }: { mode: MapMode; onMode(m: MapMode): void; layers: { id: string; name: string }[] }) {
+export function ModeSwitch({ mode, onMode, layers, hasRaces }: { mode: MapMode; onMode(m: MapMode): void; layers: { id: string; name: string }[]; hasRaces: boolean }) {
   const art = MODES.filter((m) => m.kind === 'art');
-  const data = MODES.filter((m) => m.kind === 'data');
+  const data = MODES.filter((m) => m.kind === 'data' && (m.key !== 'races' || hasRaces));
   const btn = (m: (typeof MODES)[number]) => (
     <button key={m.key} role="radio" aria-checked={mode === m.key} className={mode === m.key ? 'is-on' : ''} onClick={() => onMode(m.key)}>
-      {m.shader === 3 ? m.label : t(m.label)}
+      {isLayerMode(m.key) ? m.label : t(m.label)}
     </button>
   );
   return (
@@ -51,8 +51,23 @@ export function ModeSwitch({ mode, onMode, layers }: { mode: MapMode; onMode(m: 
   );
 }
 
-export function Legend({ mode, present, layer }: { mode: MapMode; present?: Set<number>; layer?: DataLayer | null }) {
+export function Legend({ mode, present, layer, races }: { mode: MapMode; present?: Set<number>; layer?: DataLayer | null; races?: { name: string; color: [number, number, number] }[] }) {
   if (isLayerMode(mode)) return layer ? <LayerLegend layer={layer} /> : null;
+  if (mode === 'races')
+    return (
+      <div className="legend legend--cats" aria-label={t('{name} legend', { name: t('Races') })}>
+        {(races ?? []).map((r) => (
+          <span key={r.name} className="legend__cat">
+            <i style={{ background: `rgb(${r.color.join(',')})` }} />
+            {r.name}
+          </span>
+        ))}
+        <span className="legend__cat">
+          <i style={{ background: 'rgba(205,196,176,.45)' }} />
+          {t('Unaligned')}
+        </span>
+      </div>
+    );
   const ramp = rampFor(mode);
   const cats = categoriesFor(mode);
   if (!ramp && !cats) return null;

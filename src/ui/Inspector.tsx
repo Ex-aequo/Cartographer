@@ -1,3 +1,4 @@
+import { raceOfRealm, racesOf } from '../model/races';
 import { t, num } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
 import type { MapData } from '../model/types';
@@ -50,6 +51,7 @@ export function Inspector({ map, pick, onClose, onSelectProvince, onChange, onLa
               <p className="muted">
                 {t('Region of {region}, {culture} culture', { region: region.name, culture: map.cultures[realm.culture]?.name ?? '' })}
               </p>
+              {raceOfRealm(map, realm.id) && <p className="muted">{t('Race: {name}', { name: raceOfRealm(map, realm.id)!.name })}</p>}
             </div>
           </div>
         )}
@@ -272,6 +274,29 @@ function EditNames({ map, provinceId, onChange }: { map: MapData; provinceId: nu
         </label>
         <ColorField color={realm.color} onCommit={(c) => onChange(t('Recolour realm'), (m) => (m.realms[realm.id].color = c))} />
       </div>
+      {racesOf(map).length > 0 && (
+        <label className="field">
+          <span>{t('Race')}</span>
+          <select
+            value={realm.race ?? ''}
+            onChange={(e) =>
+              onChange(t('Change race'), (m) => {
+                if (e.target.value) m.realms[realm.id].race = e.target.value;
+                else delete m.realms[realm.id].race;
+              })
+            }
+          >
+            <option value="">{t('Unaligned')}</option>
+            {racesOf(map)
+              .filter((r) => r.enabled || r.id === realm.race)
+              .map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                </option>
+              ))}
+          </select>
+        </label>
+      )}
       <div className="names__actions">
         <button type="button" className="btn btn--ghost" disabled={region.provinces.length < 2} onClick={() => onChange(t('New region from {name}', { name: prov.name }), (m) => newRegionFrom(m, prov.id))}>
           {t('Make {name} a new region', { name: prov.name })}
