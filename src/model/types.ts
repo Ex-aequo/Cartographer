@@ -12,7 +12,8 @@
  */
 
 export const FORMAT_ID = 'cartographer-map';
-export const FORMAT_VERSION = 1;
+/** 2: heightfield stored as 16-bit integers; erosion setting added. Version 1 files still open. */
+export const FORMAT_VERSION = 2;
 
 export type Template = 'continents' | 'pangaea' | 'archipelago' | 'inland-sea';
 
@@ -27,6 +28,8 @@ export interface GenParams {
   mountains: number;
   /** Multiplier on rainfall, 0.4–1.6. */
   rainfall: number;
+  /** Strength of water erosion carving valleys, 0–1. */
+  erosion: number;
   /** Average land hexes per province. */
   provinceSize: number;
   /** Average provinces per region (duchy-level grouping). */
@@ -46,6 +49,7 @@ export const DEFAULT_PARAMS: GenParams = {
   landFraction: 0.42,
   mountains: 0.55,
   rainfall: 1,
+  erosion: 0.6,
   provinceSize: 30,
   regionSize: 5,
   realmCount: 26,

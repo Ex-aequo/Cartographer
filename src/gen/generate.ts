@@ -1,7 +1,8 @@
-import { FORMAT_ID, FORMAT_VERSION, type GenParams, type MapData } from '../model/types';
+import { DEFAULT_PARAMS, FORMAT_ID, FORMAT_VERSION, type GenParams, type MapData } from '../model/types';
 import { worldSize } from '../model/hex';
 import { Rng } from '../util/rng';
 import { generateHeightfield } from './heightfield';
+import { erode } from './erosion';
 import { generateMoisture, generateTemperature } from './climate';
 import { buildHexes } from './hydrology';
 import { buildPolitical } from './political';
@@ -16,7 +17,9 @@ export function generateMap(params: GenParams, onProgress: Progress = () => {}):
 
   onProgress('Raising continents', 0.05);
   const hf = generateHeightfield(p, width, height, rng);
-  onProgress('Setting the winds', 0.35);
+  onProgress('Carving valleys', 0.25);
+  erode(hf, rng.fork('erosion'), p.erosion);
+  onProgress('Setting the winds', 0.4);
   const baseTemp = generateTemperature(p, width, height, rng);
   const moisture = generateMoisture(p, hf, baseTemp, width, height, rng);
   onProgress('Carving rivers and lakes', 0.5);
@@ -53,6 +56,7 @@ export function sanitize(p: GenParams): GenParams {
     landFraction: c(p.landFraction, 0.15, 0.7),
     mountains: c(p.mountains, 0, 1),
     rainfall: c(p.rainfall, 0.4, 1.6),
+    erosion: c(p.erosion ?? DEFAULT_PARAMS.erosion, 0, 1),
     provinceSize: Math.round(c(p.provinceSize, 6, 120)),
     regionSize: Math.round(c(p.regionSize, 2, 12)),
     realmCount: Math.round(c(p.realmCount, 1, 120)),

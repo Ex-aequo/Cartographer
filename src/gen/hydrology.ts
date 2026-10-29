@@ -80,6 +80,24 @@ export function buildHexes(p: GenParams, grid: Grid, height: Field, baseTemp: Fi
     for (const i of comp) (lake ? isLake : isOcean)[i] = 1;
   }
 
+  // --- Routing surface: elevation with a faint network of valleys along the
+  // zero lines of a noise field, so water on broad slopes gathers into
+  // branching rivers instead of running down in parallel lines.
+  const valleyNoise = new Simplex2(rngRoot.fork('valleys'));
+  const route = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const e = hex.elevation[i];
+    if (!(hex.flags[i] & HexFlag.Land)) {
+      route[i] = e;
+      continue;
+    }
+    const row = Math.floor(i / grid.cols);
+    const x = hexCenterX(i % grid.cols, row);
+    const y = hexCenterY(row);
+    const v = 1 - Math.abs(valleyNoise.fbm(x / 9, y / 9, 3));
+    route[i] = e - 0.035 * v * v * v;
+  }
+
   // --- Priority flood from the ocean: gives every land hex a drainage path.
   const filled = new Float32Array(n).fill(Infinity);
   const heap = new MinHeap(n);
@@ -104,7 +122,7 @@ export function buildHexes(p: GenParams, grid: Grid, height: Field, baseTemp: Fi
       const j = nbr[i * 6 + d];
       if (j < 0 || isOcean[j] || filled[j] !== Infinity) continue;
       const base = isOcean[i] ? 0 : filled[i];
-      filled[j] = Math.max(isLake[j] ? 0 : hex.elevation[j], base + eps);
+      filled[j] = Math.max(isLake[j] ? 0 : route[j], base + eps);
       hex.flowTo[j] = i;
       order.push(j);
       heap.push(j, filled[j]);
@@ -114,7 +132,7 @@ export function buildHexes(p: GenParams, grid: Grid, height: Field, baseTemp: Fi
   // --- Depression lakes: land sitting well below its spill level.
   const rng = rngRoot.fork('lakes');
   const cand = new Uint8Array(n);
-  for (const i of order) if (hex.flags[i] & HexFlag.Land && filled[i] - hex.elevation[i] > 0.03) cand[i] = 1;
+  for (const i of order) if (hex.flags[i] & HexFlag.Land && filled[i] - route[i] > 0.02) cand[i] = 1;
   const lseen = new Uint8Array(n);
   let lakeBudget = Math.round((n / 4000) * (0.6 + p.rainfall * 0.6));
   for (let s = 0; s < n && lakeBudget > 0; s++) {
@@ -239,15 +257,22 @@ export function buildHexes(p: GenParams, grid: Grid, height: Field, baseTemp: Fi
  */
 function enforceCoasts(f: Field, grid: Grid, hex: HexLayers): void {
   const R = 0.72;
-  const LEVEL = 0.014;
+  const LEVEL = 0.006;
   for (let i = 0; i < grid.cols * grid.rows; i++) {
     const land = (hex.flags[i] & HexFlag.Land) !== 0;
     const row = Math.floor(i / grid.cols);
     const cx = hexCenterX(i % grid.cols, row);
     const cy = hexCenterY(row);
     // skip hexes that are already clearly on the right side
-    const c = sampleField(f, cx, cy);
-    if (land ? c > 0.05 : c < -0.05) continue;
+    // skip hexes whose whole centre area is already on the right side
+    let ok = true;
+    for (let k = 0; k < 7 && ok; k++) {
+      const a = (Math.PI / 3) * k;
+      const r = k === 6 ? 0 : 0.3;
+      const c = sampleField(f, cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+      if (land ? c < 0.002 : c > -0.002) ok = false;
+    }
+    if (ok) continue;
     const i0 = Math.max(0, Math.floor((cx - R) * f.res));
     const i1 = Math.min(f.w - 1, Math.ceil((cx + R) * f.res));
     const j0 = Math.max(0, Math.floor((cy - R) * f.res));

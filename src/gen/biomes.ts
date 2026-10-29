@@ -7,7 +7,7 @@ export const ELEVATION_METRES = 5200;
 export const DEPTH_METRES = 6000;
 
 export function landBiome(tempC: number, moist: number, elevation: number): Biome {
-  if (tempC < -9) return Biome.Ice;
+  if (tempC < -12) return Biome.Ice;
   if (tempC < -1) return Biome.Tundra;
   if (tempC < 6) return moist > 0.32 ? Biome.Taiga : Biome.Tundra;
   if (moist > 0.82 && elevation < 0.12) return Biome.Wetland;

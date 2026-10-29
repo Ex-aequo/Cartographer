@@ -1,13 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DEFAULT_PARAMS, type GenParams } from './model/types';
 import { useMapWorker, type LoadedMap } from './state/useMapWorker';
 import { MapView, type MapViewHandle, type Pick } from './ui/MapView';
 import { WorldPanel } from './ui/WorldPanel';
 import { Inspector } from './ui/Inspector';
-import { ModeSwitch, Veil, ZoomLadder } from './ui/Controls';
+import { Legend, ModeSwitch, Veil, ZoomLadder } from './ui/Controls';
 import { TopBar } from './ui/TopBar';
 import { LEVELS } from './ui/zoomLevels';
-import type { MapMode } from './render/MapRenderer';
+import type { MapMode } from './render/mapModes';
+import type { Quality } from './render/MapRenderer';
 import { gzip, mapToJSON } from './model/serialize';
 import { buildGameExport } from './model/exportGame';
 
@@ -16,10 +17,33 @@ export function App() {
   const [params, setParams] = useState<GenParams>(DEFAULT_PARAMS);
   const [loaded, setLoaded] = useState<LoadedMap | null>(null);
   const [mode, setMode] = useState<MapMode>('political');
+  const [quality, setQuality] = useState<Quality>(() => {
+    try {
+      const q = localStorage.getItem('carto.quality');
+      if (q === 'high' || q === 'balanced' || q === 'fast') return q;
+    } catch {
+      /* storage unavailable: use the default */
+    }
+    return 'high';
+  });
+  const changeQuality = (q: Quality) => {
+    setQuality(q);
+    try {
+      localStorage.setItem('carto.quality', q);
+    } catch {
+      /* not persisted */
+    }
+  };
   const [pick, setPick] = useState<Pick | null>(null);
   const [zoom, setZoom] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const viewRef = useRef<MapViewHandle>(null);
+  // only list the categories that actually occur in this world
+  const presentCodes = useMemo(() => {
+    if (!loaded || (mode !== 'biome' && mode !== 'terrain')) return undefined;
+    const arr = mode === 'biome' ? loaded.map.hex.biome : loaded.map.hex.terrain;
+    return new Set(Array.from(new Set(arr)));
+  }, [loaded, mode]);
 
   const draw = useCallback(
     async (p: GenParams) => {
@@ -79,6 +103,7 @@ export function App() {
       flyTo: (z: number, x?: number, y?: number) => viewRef.current?.flyTo(z, x, y),
       jumpTo: (z: number, x?: number, y?: number) => viewRef.current?.jumpTo(z, x, y),
       setMode,
+      setUniform: (n: string, v: number) => viewRef.current?.setUniform(n, v),
       select: (p: Pick | null) => setPick(p),
       generate: (p: Partial<GenParams>) => draw({ ...DEFAULT_PARAMS, ...p }),
     };
@@ -86,8 +111,8 @@ export function App() {
 
   return (
     <div className="app">
-      <MapView ref={viewRef} loaded={loaded} mode={mode} selected={pick} onSelect={setPick} onZoom={setZoom} />
-      <TopBar name={loaded?.map.meta.params.seed ?? ''} hasMap={!!loaded} onOpen={onOpen} onSave={onSave} onExportData={onExportData} onExportImage={onExportImage} />
+      <MapView ref={viewRef} quality={quality} loaded={loaded} mode={mode} selected={pick} onSelect={setPick} onZoom={setZoom} />
+      <TopBar quality={quality} onQuality={changeQuality} name={loaded?.map.meta.params.seed ?? ''} hasMap={!!loaded} onOpen={onOpen} onSave={onSave} onExportData={onExportData} onExportImage={onExportImage} />
       <WorldPanel params={params} onChange={setParams} onGenerate={draw} busy={!!busy} />
       {loaded && pick && (
         <Inspector
@@ -112,6 +137,7 @@ export function App() {
             onStep={(f) => viewRef.current?.flyTo(zoom * f)}
           />
           <ModeSwitch mode={mode} onMode={setMode} />
+          <Legend mode={mode} present={presentCodes} />
         </>
       )}
       {busy && <Veil step={busy.step} fraction={busy.fraction} />}
