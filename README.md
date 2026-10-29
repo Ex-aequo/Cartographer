@@ -115,8 +115,12 @@ Requires Node 20 or newer and a browser with WebGL 2.
   with realm names, terrain with region names, or provinces with towns), in
   the current map mode, with symbols. It is painted in tiles and lettered in
   one pass, so nothing is cut at the seams.
+- **Export → All map modes…**: one image per map mode (Political, Physical,
+  Elevation, Temperature, Rainfall, Biome, Terrain type) and per data layer,
+  zipped; pick which modes, the style and the size.
 - **Export → Export set…**: any mix of
   - the high-resolution image;
+  - all map modes (as above);
   - a **province map** (`provinces.png` + `definition.csv`): one unique colour
     per province and per sea zone, as Paradox games use, with borders along
     hex edges or as drawn;

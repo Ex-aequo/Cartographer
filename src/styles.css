@@ -1347,3 +1347,11 @@ input[type='color']::-moz-color-swatch {
 .panel--world {
   width: 306px;
 }
+.mode-picks {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px 10px;
+  margin: 4px 0 2px;
+  font-size: 13.5px;
+}

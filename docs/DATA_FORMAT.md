@@ -209,6 +209,7 @@ point ((x + 0.5) / s, (y + 0.5) / s), where s = image width ÷ world width.
 | File | Contents |
 | --- | --- |
 | `map.png` | The rendered map, up to 16,384 px wide, in World, Realm or Province style. |
+| `modes/*.png` | One image per map mode (`01-political.png` … `07-terrain.png`) and per data layer (`layer-<id>.png`), same style and size for all. |
 | `provinces.png` | 8-bit RGB. Each land province and each sea zone has a unique colour (never black); borders along hex edges or as drawn. |
 | `definition.csv` | `province;red;green;blue;name;type;x;y` (semicolons, as Paradox games expect). `type` is `land`, `sea` or `lake`; x, y is a pixel inside it. |
 | `heightmap.png` | 16-bit greyscale: 0 = deepest sea, 32768 = sea level, 65535 = highest peak. |
