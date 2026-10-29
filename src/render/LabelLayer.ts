@@ -25,13 +25,17 @@ export function drawLabels(ctx: CanvasRenderingContext2D, cssW: number, cssH: nu
   const hits = (b: number[]) => boxes.some((o) => b[0] < o[2] && b[2] > o[0] && b[1] < o[3] && b[3] > o[1]);
 
   // ---- realm names: large, curved, letter-spaced (world zooms)
-  const realmAlpha = 1 - fade(z, 7, 12);
+  const realmAlpha = 1 - fade(z, 6, 8.5);
   if (realmAlpha > 0.01) {
-    for (const l of a.realmLabels) drawCurved(ctx, l, toScreen, z, realmAlpha, onScreen, REALM_STYLE);
+    for (const l of a.realmLabels) {
+      const box = drawCurved(ctx, l, toScreen, z, realmAlpha, onScreen, REALM_STYLE);
+      // while realm names are still legible, region names keep clear of them
+      if (box && realmAlpha > 0.25) boxes.push(box);
+    }
   }
 
   // ---- region (duchy) names: realm zoom
-  const regionAlpha = fade(z, 6.5, 9) * (1 - fade(z, 15, 19));
+  const regionAlpha = fade(z, 7, 9) * (1 - fade(z, 15, 19));
   if (regionAlpha > 0.01) {
     for (const l of a.regionLabels) {
       const box = drawCurved(ctx, l, toScreen, z, regionAlpha, onScreen, REGION_STYLE, hits);
