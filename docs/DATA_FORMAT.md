@@ -42,6 +42,7 @@ Two files come out of Cartographer:
   "cultures": [ ... ],
   "rivers":   [ ... ],
   "hexes":    [ ... ],
+  "races":    [ ... ]     // the races of this world and their homeland biases
   "seaZones": [ ... ]     // the water, split into navigable zones
   "symbols":  [ ... ]     // symbols pinned to hexes
   "layers":   [ ... ]     // definitions of your custom data layers
@@ -69,6 +70,7 @@ Two files come out of Cartographer:
 | `flowsTo` | int | Downstream hex id, −1 for water. Every land hex drains to the sea. |
 | `province` | int | Province id, −1 for water. |
 | `seaZone` | int | Sea zone or lake id (from 100000) for water hexes, −1 on land. |
+| `race` | string \| null | Race of the realm that owns this hex (see *Races*). |
 | `edited` | bool | Changed by hand in the editor (height, terrain or river). |
 | `paintedTerrain` | bool | `terrain` was set by hand and overrides the climate. |
 | `data` | object | Values of every per-hex custom layer, keyed by layer id (see *Custom data layers*). |
@@ -224,3 +226,23 @@ point ((x + 0.5) / s, (y + 0.5) / s), where s = image width ÷ world width.
 
 Heightmaps and masks share one size (1,024 to 8,192 px wide); the province
 map has its own (2,048 to 8,192 px).
+
+## Races
+
+Races are chosen in *New world* and shape where kingdoms form. Each realm has
+`race` (a race id, or `null` for unaligned); provinces and hexes repeat their
+realm's race for convenience.
+
+```jsonc
+"races": [
+  { "id": "dwarves", "name": "Dwarves", "color": "#707680",
+    "biases": [ { "terrains": ["Hills", "Mountains", "Peaks"], "terrainCodes": [7, 8, 9],
+                  "op": "min", "percent": 50 } ],
+    "climateC": [-15, 18], "coast": "any", "size": "small" }
+]
+```
+
+`op` is `min` (at least `percent` of the realm's land hexes are one of the
+terrains) or `max` (at most). `csv/races.csv` lists each race's kingdoms, land
+and how many of its kingdoms meet all targets; `csv/realms.csv` has a `race`
+column.

@@ -34,6 +34,7 @@ export function buildGameExport(map: MapData) {
   const hexes = [];
   const pinned = pinnedForExport(map);
   const sea = seaZones(map);
+  const raceOfProvince = (p: number) => (p >= 0 ? (map.realms[map.regions[map.provinces[p]?.region]?.realm]?.race ?? null) : null);
   const symbolsByHex = new Map<number, string[]>();
   for (const p of pinned) symbolsByHex.set(p.hex, [...(symbolsByHex.get(p.hex) ?? []), p.symbol]);
   const hexLayers = (map.layers ?? []).filter((l) => l.def.scope === 'hex');
@@ -70,6 +71,7 @@ export function buildGameExport(map: MapData) {
         flowsTo: map.hex.flowTo[i],
         province: map.hex.province[i],
         seaZone: sea.zoneOf[i] >= 0 ? sea.zones[sea.zoneOf[i]].id : -1,
+        race: raceOfProvince(map.hex.province[i]),
         edited: map.edits ? map.edits.touched[i] !== 0 : false,
         paintedTerrain: !!map.edits && map.edits.terrain[i] >= 0,
         data: dataOf(hexLayers, i),
@@ -96,6 +98,7 @@ export function buildGameExport(map: MapData) {
       name: r.name,
       title: r.title,
       culture: r.culture,
+      race: r.race ?? null,
       color: hex(r.color),
       capitalProvince: r.capitalProvince,
       regions: r.regions,
@@ -107,6 +110,7 @@ export function buildGameExport(map: MapData) {
       name: p.name,
       region: p.region,
       realm: map.regions[p.region].realm,
+      race: raceOfProvince(p.id),
       capitalHex: p.capitalHex,
       center: [round(p.center[0], 3), round(p.center[1], 3)],
       terrain: TERRAIN_NAMES[p.terrain],
@@ -121,6 +125,9 @@ export function buildGameExport(map: MapData) {
     cultures: map.cultures,
     rivers: map.rivers.map((r) => ({ id: r.id, name: r.name, hexes: r.hexes })),
     hexes,
+    races: (map.meta.params.races ?? [])
+      .filter((r) => r.enabled)
+      .map((r) => ({ id: r.id, name: r.name, color: hex(r.color), biases: r.biases.map((b) => ({ terrains: b.terrains.map((c) => TERRAIN_NAMES[c as 0]), terrainCodes: b.terrains, op: b.op, percent: b.pct })), climateC: [r.tempMin, r.tempMax], coast: r.coast, size: r.size })),
     seaZones: sea.zones.map((z) => ({ id: z.id, name: z.name, kind: z.kind, hexCount: z.hexes.length, coastalProvinces: z.coast })),
     symbols: pinned,
     layers: (map.layers ?? []).map(({ def }) => ({

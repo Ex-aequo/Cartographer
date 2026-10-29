@@ -1,3 +1,4 @@
+import { raceReport } from '../model/races';
 import { BIOME_NAMES, HexFlag, TERRAIN_NAMES, Terrain, type MapData } from '../model/types';
 import { buildNeighbors, hexAt, hexCenterX, hexCenterY, sampleField, toAxial } from '../model/hex';
 import { ownerAt, buildWarp } from '../render/assets';
@@ -437,8 +438,8 @@ export function tables(map: MapData): Record<string, string> {
   }
   const regions = ['region_id,name,realm_id,capital_province,provinces'];
   for (const g of map.regions) if (!g.retired) regions.push(row([g.id, g.name, g.realm, g.capitalProvince, g.provinces.join(' ')]));
-  const realms = ['realm_id,name,title,culture,color,capital_province,regions'];
-  for (const r of map.realms) if (!r.retired) realms.push(row([r.id, r.name, r.title, map.cultures[r.culture]?.name ?? '', '#' + r.color.map((c) => c.toString(16).padStart(2, '0')).join(''), r.capitalProvince, r.regions.join(' ')]));
+  const realms = ['realm_id,name,title,culture,race,color,capital_province,regions'];
+  for (const r of map.realms) if (!r.retired) realms.push(row([r.id, r.name, r.title, map.cultures[r.culture]?.name ?? '', r.race ?? '', '#' + r.color.map((c) => c.toString(16).padStart(2, '0')).join(''), r.capitalProvince, r.regions.join(' ')]));
   const seas = ['sea_zone_id,name,kind,hex_count,coastal_provinces'];
   for (const z of zones) seas.push(row([z.id, z.name, z.kind, z.hexes.length, z.coast.join(' ')]));
   const out: Record<string, string> = {
@@ -448,6 +449,16 @@ export function tables(map: MapData): Record<string, string> {
     'realms.csv': realms.join('\n') + '\n',
     'sea_zones.csv': seas.join('\n') + '\n',
   };
+  const races = (map.meta.params.races ?? []).filter((r) => r.enabled);
+  if (races.length) {
+    const fits = raceReport(map);
+    const rs = ['race_id,name,kingdoms,land_hexes,targets,met'];
+    for (const r of races) {
+      const mine = fits.filter((f) => f.race.id === r.id);
+      rs.push(row([r.id, r.name, mine.length, mine.reduce((a, f) => a + f.land, 0), r.biases.map((b) => `${b.op === 'min' ? '>=' : '<='}${b.pct}% ${b.terrains.map((c) => TERRAIN_NAMES[c as Terrain]).join('/')}`).join('; '), mine.filter((f) => f.ok).length + '/' + mine.length]));
+    }
+    out['races.csv'] = rs.join('\n') + '\n';
+  }
   const pins = (map.symbols?.placements ?? []).filter((p) => p.hex >= 0);
   if (pins.length) {
     const s = ['symbol_id,hex_id,col,row,symbol,asset_id,x,y'];

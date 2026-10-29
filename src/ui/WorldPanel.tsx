@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import type React from 'react';
-import type { GenParams, Template } from '../model/types';
+import type { GenParams, MapData, Template } from '../model/types';
+import { RacesSection } from './RacesSection';
+import { racesOrPresets } from '../model/races';
 import { randomSeedWord } from '../util/rng';
 import { LANGS, setLang, t, useLang, type Lang } from '../i18n';
 
@@ -69,9 +71,14 @@ interface Props {
   busy: boolean;
   /** this world has hand edits that drawing a new one would throw away */
   hasEdits: boolean;
+  map: MapData | null;
+  onFit(): void;
+  working: boolean;
+  onDownload(blob: Blob, name: string): void;
+  notify(msg: string): void;
 }
 
-export function WorldPanel({ params, onChange, onGenerate, busy, hasEdits }: Props) {
+export function WorldPanel({ params, onChange, onGenerate, busy, hasEdits, map, onFit, working, onDownload, notify }: Props) {
   const set = <K extends keyof GenParams>(k: K, v: GenParams[K]) => onChange({ ...params, [k]: v });
   const sizeIdx = SIZES.findIndex((s) => s.cols === params.cols);
   const climateIdx = CLIMATES.findIndex((c) => c.north === params.tempNorth && c.south === params.tempSouth);
@@ -143,8 +150,10 @@ export function WorldPanel({ params, onChange, onGenerate, busy, hasEdits }: Pro
           <Slider label={t('Province size')} value={params.provinceSize} min={12} max={80} step={1} format={(v) => t('{n} hexes', { n: v })} onChange={(v) => set('provinceSize', v)} />
           <Slider label={t('Realms')} value={params.realmCount} min={3} max={80} step={1} format={(v) => String(v)} onChange={(v) => set('realmCount', v)} />
 
+          <RacesSection races={racesOrPresets(params.races)} realmCount={params.realmCount} onChange={(races) => set('races', races)} map={map} onFit={onFit} working={working} onDownload={onDownload} notify={notify} />
+
           {hasEdits && <p className="warn">{t('Drawing a new world replaces this one, including your edits. Save first to keep them.')}</p>}
-          <button type="submit" className="btn btn--seal" disabled={busy}>
+          <button type="submit" className="btn btn--seal btn--sticky" disabled={busy}>
             {t(busy ? 'Drawing…' : hasEdits ? 'Discard edits and draw' : 'Draw this world')}
           </button>
         </form>

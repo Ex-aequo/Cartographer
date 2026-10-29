@@ -88,7 +88,7 @@ interface Diff {
 export interface PoliticalCore {
   provinces: { name: string; region: number; capitalHex: number }[];
   regions: { name: string; realm: number; capitalProvince: number }[];
-  realms: { name: string; title: string; color: [number, number, number]; culture: number; capitalProvince: number }[];
+  realms: { name: string; title: string; color: [number, number, number]; culture: number; capitalProvince: number; race?: string }[];
   labels: Record<string, LabelEdit>;
 }
 
@@ -635,7 +635,7 @@ export function captureCore(map: MapData): PoliticalCore {
   return {
     provinces: map.provinces.map((p) => ({ name: p.name, region: p.region, capitalHex: p.capitalHex })),
     regions: map.regions.map((r) => ({ name: r.name, realm: r.realm, capitalProvince: r.capitalProvince })),
-    realms: map.realms.map((r) => ({ name: r.name, title: r.title, color: [...r.color] as [number, number, number], culture: r.culture, capitalProvince: r.capitalProvince })),
+    realms: map.realms.map((r) => ({ name: r.name, title: r.title, color: [...r.color] as [number, number, number], culture: r.culture, capitalProvince: r.capitalProvince, race: r.race })),
     labels: JSON.parse(JSON.stringify(map.labels ?? {})),
   };
 }

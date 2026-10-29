@@ -210,6 +210,7 @@ export function newRealmFrom(map: MapData, region: number): number {
     color: [...best] as [number, number, number],
     regions: [region],
     capitalProvince: rg.capitalProvince,
+    ...(old.race ? { race: old.race } : {}),
   });
   rg.realm = id;
   return id;

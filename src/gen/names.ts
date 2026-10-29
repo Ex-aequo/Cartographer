@@ -52,7 +52,47 @@ const PALETTES = [
     codas: ['v', 'n', 'sk', 'l', 'r', 'ch', 'k', 'm', 'd', 'sl', 'zd'],
     endings: ['grad', 'ov', 'ava', 'ice', 'nik', 'ovo', 'ska', 'in', 'yev', 'ets'],
   },
+  // ---- race styles (indices from PALETTE_COUNT on; never drawn for ordinary cultures)
+  {
+    key: 'dwarf',
+    onsets: ['k', 'kh', 'd', 'dr', 'b', 'br', 'g', 'gr', 'th', 'z', 'n', 'm', 'h', 'bal', 'thr'],
+    nuclei: ['a', 'u', 'o', 'i', 'â', 'û', 'a', 'u'],
+    codas: ['r', 'rd', 'k', 'z', 'm', 'n', 'nd', 'rk', 'g', 'ld', 'rn'],
+    endings: ['dûm', 'grund', 'dar', 'heim', 'garth', 'kar', 'zad', 'mund', 'bor', 'hold'],
+  },
+  {
+    key: 'elf',
+    onsets: ['l', 'th', 'f', 'n', 'm', 's', 'v', 'el', 'gl', 'c', 'ar', 'ith', 'r', 'y'],
+    nuclei: ['a', 'e', 'i', 'ae', 'ie', 'ea', 'ia', 'ë', 'o'],
+    codas: ['l', 'n', 'r', 's', 'th', 'nd', 'll', 'ss'],
+    endings: ['iel', 'ora', 'wen', 'anor', 'ith', 'ael', 'eth', 'ion', 'alas', 'ië'],
+  },
+  {
+    key: 'auroch',
+    onsets: ['t', 'k', 'h', 'm', 'b', 'r', 'w', 'n', 'kh', 'tah', 'ha', 'mu', 'oh'],
+    nuclei: ['a', 'o', 'u', 'aa', 'oo', 'ah', 'e', 'a'],
+    codas: ['n', 'k', 'h', 'r', 'm', 't', 'hk', 'rn'],
+    endings: ['hoof', 'mesa', 'totem', 'horn', 'wa', 'kota', 'hun', 'aru', 'mak', 'ohm'],
+  },
+  {
+    key: 'orc',
+    onsets: ['g', 'gr', 'z', 'k', 'kr', 'm', 'sh', 'b', 'dr', 'r', 'th', 'ug', 'n', 'gh'],
+    nuclei: ['a', 'u', 'o', 'u', 'a', 'ra', 'ü'],
+    codas: ['g', 'k', 'z', 'r', 'sh', 'rg', 'ck', 'gg', 'th', 'm'],
+    endings: ['gar', 'rok', 'mog', 'gash', 'dush', 'thar', 'nak', 'zug', 'grim', 'ruk'],
+  },
+  {
+    key: 'lizard',
+    onsets: ['s', 'ss', 'x', 'z', 'tl', 'k', 'ch', 'sh', 'q', 'y', 'ts', 'hs'],
+    nuclei: ['a', 'i', 'e', 'u', 'ii', 'aa', 'o'],
+    codas: ['s', 'x', 'k', 'tl', 'th', 'sh', 'z', 'q'],
+    endings: ['ssa', 'xis', 'tlan', 'koth', 'issik', 'zar', 'qua', 'esh', 'otl', 'yss'],
+  },
 ];
+
+/** Name styles a race can use, by key (index into PALETTES). */
+export const NAME_STYLES = PALETTES.map((p, i) => ({ key: p.key, index: i }));
+export const paletteIndexOf = (key: string) => Math.max(0, PALETTES.findIndex((p) => p.key === key));
 
 export interface NameCulture {
   onsets: string[];
@@ -78,7 +118,8 @@ export function makeCulture(rng: Rng, paletteIndex: number): NameCulture {
   };
 }
 
-export const PALETTE_COUNT = PALETTES.length;
+/** Ordinary cultures draw from the first seven palettes only (keeps existing worlds unchanged). */
+export const PALETTE_COUNT = 7;
 
 export class NameForge {
   private used = new Set<string>();

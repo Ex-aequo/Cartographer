@@ -10,6 +10,8 @@ import { useSymbols } from './state/useSymbols';
 import { layerColors, layerCsv } from './model/layers';
 import { zip } from './util/zip';
 import { saveFile } from './platform';
+import { fitBorders, raceColors, shapeTerrain } from './model/races';
+import { ensureEdits } from './gen/rederive';
 import { t, useLang } from './i18n';
 import { ExportDialog, modeLabelOf, type DialogPart } from './ui/ExportDialog';
 import { useEditor } from './state/useEditor';
@@ -79,10 +81,10 @@ export function App() {
     if (shownLayerId && loaded && !shownLayer) setMode('political');
   }, [shownLayerId, shownLayer, loaded]);
   const shownColors = useMemo(
-    () => (loaded && shownLayer ? layerColors(loaded.map, shownLayer) : null),
+    () => (loaded && mode === 'races' ? raceColors(loaded.map) : loaded && shownLayer ? layerColors(loaded.map, shownLayer) : null),
     // values change in place: the editor revision says when
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [loaded, shownLayer, editor.revision],
+    [loaded, shownLayer, mode, editor.revision],
   );
 
   const symRef = useRef(sym);
@@ -216,7 +218,23 @@ export function App() {
       />
       <SidePanel tab={tab} onTab={changeTab}>
         {tab === 'world' ? (
-          <WorldPanel params={params} onChange={setParams} onGenerate={draw} busy={!!busy} hasEdits={editor.hasEdits} />
+          <WorldPanel
+            params={params}
+            onChange={setParams}
+            onGenerate={draw}
+            busy={!!busy}
+            hasEdits={editor.hasEdits}
+            map={loaded?.map ?? null}
+            working={editor.working}
+            onDownload={download}
+            notify={setError}
+            onFit={() =>
+              editor.change(t('Fit kingdoms to their races'), (m) => {
+                fitBorders(m);
+                shapeTerrain(m, ensureEdits(m));
+              })
+            }
+          />
         ) : tab === 'symbols' ? (
           loaded && (
             <SymbolsPanel
@@ -311,8 +329,8 @@ export function App() {
             }}
             onStep={(f) => viewRef.current?.flyTo(zoom * f)}
           />
-          <ModeSwitch mode={mode} onMode={setMode} layers={layers.map((l) => ({ id: l.def.id, name: l.def.name }))} />
-          <Legend mode={mode} present={presentCodes} layer={shownLayer} />
+          <ModeSwitch mode={mode} onMode={setMode} layers={layers.map((l) => ({ id: l.def.id, name: l.def.name }))} hasRaces={!!loaded?.map.realms.some((r) => r.race && !r.retired)} />
+          <Legend mode={mode} present={presentCodes} layer={shownLayer} races={(loaded?.map.meta.params.races ?? []).filter((r) => loaded?.map.realms.some((x) => x.race === r.id && !x.retired))} />
         </>
       )}
       {loaded && exporting && (
@@ -321,7 +339,7 @@ export function App() {
           assets={loaded.assets}
           mode={mode}
           modeLabel={modeLabelOf(mode, layers)}
-          layer={shownLayer && shownColors ? { colors: shownColors, badges: shownLayer.def.showIcons ? shownLayer : null } : null}
+          layer={shownColors ? { colors: shownColors, badges: shownLayer?.def.showIcons ? shownLayer : null } : null}
           initial={exporting}
           fileBase={fileBase()}
           onClose={() => setExporting(null)}

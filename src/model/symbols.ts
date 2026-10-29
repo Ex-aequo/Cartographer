@@ -172,7 +172,13 @@ export function placementAt(map: MapData, x: number, y: number, zoom: number): P
 /** Which asset marks a province's town, or null for the default keep. */
 export function settlementAsset(map: MapData, province: number, kind: 'capital' | 'seat' | 'town'): string | null {
   const st = map.symbols?.settlements;
-  if (!st || st.mode === 'keep') return null;
+  if (!st || st.mode === 'keep') {
+    // with the standard marks chosen, a race's own town mark still shows
+    const realm = map.regions[map.provinces[province]?.region]?.realm;
+    const raceId = realm !== undefined ? map.realms[realm]?.race : undefined;
+    const race = raceId ? map.meta.params.races?.find((r) => r.id === raceId) : undefined;
+    return race?.townMark || null;
+  }
   if (st.mode === 'size') return st.size[kind] ?? null;
   const p = map.provinces[province];
   const realmId = map.regions[p.region]?.realm;

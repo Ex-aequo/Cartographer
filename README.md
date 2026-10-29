@@ -42,6 +42,18 @@ Requires Node 20 or newer and a browser with WebGL 2.
   climate band, province size and number of realms.
   *Draw this world* generates it; the same seed and settings always give the
   same world.
+- **Races** (in *New world*): tick the peoples of the world (Humans, Dwarves,
+  Elves, Auroch, Orcs, Lizardfolk, Nomads, Frost folk, or your own) and set
+  each one's homeland: lines like "at least 50 % of the kingdom is Mountains /
+  Hills", "at most 5 % Desert", a climate range, coast or inland, how many
+  kingdoms (a number or a share of all realms), kingdom size, name style and
+  town mark. Drawing the world founds each race's kingdoms on the land that
+  suits it and grows their borders toward it. *Kingdoms in this world* then
+  checks every race kingdom against its targets; *Fit borders* trades border
+  provinces to close the gaps, and for races allowed to change the land,
+  paints terrain where borders are not enough. Races can be saved and loaded
+  as a set. The *Races* map mode shows who lives where; the inspector shows and
+  changes a realm's race.
 - **Zoom levels** (right edge): World (realms on a paper map), Realm (regions
   and their names), Province (provinces, towns, farmland), Hex (individual
   hexes). Scroll, pinch or use + and − to move between them; the paper map
@@ -174,6 +186,7 @@ clicks always land on the province you see.
      painting, province roll-ups, templates and CSV export.
    - **3d (done)**: symbols: the built-in ink set and your own SVG and
      PNG pictures, placing, pinning, town marks, symbol sets.
-4. **Phase 4 (this release)**: full export set (tiled high-resolution
+4. **Phase 4 (done)**: full export set (tiled high-resolution
    images, province ID image with sea zones, heightmaps and masks, CSV) and
    the desktop app.
+5. **0.5 (this release)**: races with homeland biases.

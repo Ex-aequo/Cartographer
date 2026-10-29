@@ -1,5 +1,6 @@
 import type { DataLayer } from './layers';
 import type { SymbolData } from './symbols';
+import type { RaceDef } from './races';
 
 /**
  * Cartographer map data model.
@@ -43,6 +44,8 @@ export interface GenParams {
   /** Temperature at the north edge and south edge of the map, °C at sea level. */
   tempNorth: number;
   tempSouth: number;
+  /** Races and their homeland biases (only the enabled ones shape the world). */
+  races?: RaceDef[];
 }
 
 export const DEFAULT_PARAMS: GenParams = {
@@ -218,6 +221,8 @@ export interface Realm {
   color: [number, number, number];
   regions: number[];
   capitalProvince: number;
+  /** race id (see model/races.ts); absent = unaligned */
+  race?: string;
 }
 
 export interface Culture {

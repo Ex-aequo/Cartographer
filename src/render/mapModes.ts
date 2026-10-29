@@ -1,7 +1,7 @@
 import { Biome, BIOME_NAMES, Terrain, TERRAIN_NAMES } from '../model/types';
 import { DEPTH_METRES, ELEVATION_METRES } from '../gen/biomes';
 
-export type BuiltinMode = 'political' | 'physical' | 'elevation' | 'temperature' | 'rainfall' | 'biome' | 'terrain';
+export type BuiltinMode = 'political' | 'physical' | 'elevation' | 'temperature' | 'rainfall' | 'biome' | 'terrain' | 'races';
 /** built-in modes, or `layer:<id>` for a custom data layer */
 export type MapMode = BuiltinMode | `layer:${string}`;
 
@@ -27,6 +27,7 @@ export const MODES: ModeDef[] = [
   { key: 'rainfall', label: 'Rainfall', kind: 'data', shader: 1, source: 2 },
   { key: 'biome', label: 'Biome', kind: 'data', shader: 2, source: 3 },
   { key: 'terrain', label: 'Terrain type', kind: 'data', shader: 2, source: 4 },
+  { key: 'races', label: 'Races', kind: 'data', shader: 3 },
 ];
 
 export const modeDef = (m: MapMode): ModeDef => (isLayerMode(m) ? { key: m, label: 'Layer', kind: 'data', shader: 3 } : (MODES.find((d) => d.key === m) ?? MODES[0]));

@@ -5,6 +5,7 @@ import type { RenderAssets } from '../render/assets';
 import type { MapMode } from '../render/mapModes';
 import { MODES, modeDef } from '../render/mapModes';
 import { layerColors } from '../model/layers';
+import { raceColors } from '../model/races';
 import type { DataLayer } from '../model/layers';
 import { LOOKS, WIDTHS, highResSize, renderHighRes, sharpnessFor, type LookKey } from '../export/highres';
 import { runExport, type ExportPart } from '../export/request';
@@ -14,7 +15,8 @@ export type DialogPart = 'image' | 'modes' | ExportPart;
 
 /** Every map mode, plus one per custom data layer, as `{ key, name, file }`. */
 export function modeList(map: MapData): { key: MapMode; name: string; file: string }[] {
-  const built = MODES.map((m, i) => ({ key: m.key as MapMode, name: t(m.label), file: `modes/${String(i + 1).padStart(2, '0')}-${m.key}.png` }));
+  const hasRaces = map.realms.some((r) => r.race && !r.retired);
+  const built = MODES.filter((m) => m.key !== 'races' || hasRaces).map((m, i) => ({ key: m.key as MapMode, name: t(m.label), file: `modes/${String(i + 1).padStart(2, '0')}-${m.key}.png` }));
   const layers = (map.layers ?? []).map((l) => ({ key: `layer:${l.def.id}` as MapMode, name: l.def.name, file: `modes/layer-${l.def.id}.png` }));
   return [...built, ...layers];
 }
@@ -92,7 +94,7 @@ export function ExportDialog(p: Props) {
       }
       for (const m of chosenModes) {
         const l = m.key.startsWith('layer:') ? p.map.layers.find((x) => `layer:${x.def.id}` === m.key) : undefined;
-        const layer = l ? { colors: layerColors(p.map, l), badges: l.def.showIcons ? l : null } : null;
+        const layer = l ? { colors: layerColors(p.map, l), badges: l.def.showIcons ? l : null } : m.key === 'races' ? { colors: raceColors(p.map), badges: null } : null;
         const blob = await renderHighRes(p.map, p.assets, { width: modeWidth, look: modeLook, mode: m.key, layer }, (_label, f) => step(t('Map mode: {name}', { name: m.name }), f));
         files.push({ name: m.file, data: new Uint8Array(await blob.arrayBuffer()) });
         done++;
