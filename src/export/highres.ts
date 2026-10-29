@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import type { MapData } from '../model/types';
 import type { RenderAssets } from '../render/assets';
 import { MapRenderer } from '../render/MapRenderer';
@@ -49,14 +50,14 @@ const TILE = 2048;
 
 export async function renderHighRes(map: MapData, assets: RenderAssets, o: HighResOptions, onProgress: (label: string, f: number) => void): Promise<Blob> {
   const { width, height } = highResSize(map, o.width);
-  if (width * height > MAX_PIXELS) throw new Error(`An image of ${width} × ${height} pixels is larger than browsers can draw. Choose a smaller size.`);
+  if (width * height > MAX_PIXELS) throw new Error(t('An image of {w} × {h} pixels is larger than browsers can draw. Choose a smaller size.', { w: width, h: height }));
   const look = LOOKS.find((l) => l.key === o.look)!.zoom;
   const pr = width / (map.world.width * look);
   const out = document.createElement('canvas');
   out.width = width;
   out.height = height;
   const ctx = out.getContext('2d');
-  if (!ctx) throw new Error('Your browser could not make an image this large. Choose a smaller size.');
+  if (!ctx) throw new Error(t('Your browser could not make an image this large. Choose a smaller size.'));
   const glCanvas = document.createElement('canvas');
   const r = new MapRenderer(glCanvas);
   try {
@@ -76,19 +77,19 @@ export async function renderHighRes(map: MapData, assets: RenderAssets, o: HighR
         r.renderExact({ view: { cx: (x0 + tw / 2) / scale, cy: (y0 + th / 2) / scale, zoom: look }, mode: o.mode, selectedProvince: -1, hoveredProvince: -1 }, tw, th, pr);
         ctx.drawImage(glCanvas, 0, 0, tw, th, x0, y0, tw, th);
         k++;
-        onProgress('Painting the map', (k / (cols * rows)) * 0.75);
+        onProgress(t('Painting the map'), (k / (cols * rows)) * 0.75);
         // let the page breathe between tiles
         await new Promise((res) => setTimeout(res, 0));
       }
-    onProgress('Lettering', 0.78);
+    onProgress(t('Lettering'), 0.78);
     const view = { cx: map.world.width / 2, cy: map.world.height / 2, zoom: look };
     drawLabels(ctx, width / pr, height / pr, pr, view, map, assets, null, null, false);
     if (o.layer?.badges) drawLayerBadges(ctx, width / pr, height / pr, pr, view, map, o.layer.badges);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    onProgress('Compressing the image', 0.85);
+    onProgress(t('Compressing the image'), 0.85);
     const blob = await new Promise<Blob | null>((res) => out.toBlob(res, 'image/png'));
-    if (!blob) throw new Error('The image could not be compressed. Try a smaller size.');
-    onProgress('Done', 1);
+    if (!blob) throw new Error(t('The image could not be compressed. Try a smaller size.'));
+    onProgress(t('Done'), 1);
     return blob;
   } finally {
     r.dispose(true);

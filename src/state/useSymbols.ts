@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import type { MapData } from '../model/types';
 import { DEFAULT_PLACE, addPlacement, pinToHex, placementAt, type PlaceOptions, type Placement } from '../model/symbols';
@@ -66,7 +67,7 @@ export function useSymbols(loaded: LoadedMap | null, editor: Editor, open: boole
       up() {
         const d = drag.current;
         drag.current = null;
-        if (d?.moved) state.current.editor.endLive('Move symbol');
+        if (d?.moved) state.current.editor.endLive(t('Move symbol'));
       },
       click(wx, wy, zoom, shift) {
         const s = state.current;
@@ -75,7 +76,7 @@ export function useSymbols(loaded: LoadedMap | null, editor: Editor, open: boole
           const asset = s.armedAsset;
           let id = -1;
           s.editor.change(
-            'Place symbol',
+            t('Place symbol'),
             (m) => {
               id = addPlacement(m, asset, wx, wy, s.opts, shift).id;
             },
@@ -109,7 +110,7 @@ export function useSymbols(loaded: LoadedMap | null, editor: Editor, open: boole
     const id = state.current.selected;
     if (id === null) return;
     state.current.editor.change(
-      'Delete symbol',
+      t('Delete symbol'),
       (m) => {
         if (m.symbols) m.symbols.placements = m.symbols.placements.filter((p) => p.id !== id);
       },

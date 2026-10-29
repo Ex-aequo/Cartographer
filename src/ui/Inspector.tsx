@@ -1,3 +1,4 @@
+import { t, num } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
 import type { MapData } from '../model/types';
 import { REALM_TITLES, newRealmFrom, newRegionFrom } from '../edit/political';
@@ -31,10 +32,10 @@ export function Inspector({ map, pick, onClose, onSelectProvince, onChange, onLa
   const rgb = realm ? `rgb(${realm.color.join(',')})` : undefined;
 
   return (
-    <aside className="panel panel--inspector" aria-label="Inspector">
+    <aside className="panel panel--inspector" aria-label={t('Inspector')}>
       <header className="panel__head">
-        <h2>{prov ? prov.name : (f & HexFlag.Lake ? 'Lake' : 'Open water')}</h2>
-        <button className="icon-btn" onClick={onClose} aria-label="Close inspector">
+        <h2>{prov ? prov.name : t(f & HexFlag.Lake ? 'Lake' : 'Open water')}</h2>
+        <button className="icon-btn" onClick={onClose} aria-label={t('Close inspector')}>
           ×
         </button>
       </header>
@@ -44,10 +45,10 @@ export function Inspector({ map, pick, onClose, onSelectProvince, onChange, onLa
             <span className="shield" style={{ background: rgb }} aria-hidden />
             <div>
               <p className="heraldry__realm">
-                {realm.title} of {realm.name}
+                {t('{title} of {name}', { title: t(realm.title), name: realm.name })}
               </p>
               <p className="muted">
-                Region of {region.name}, {map.cultures[realm.culture]?.name} culture
+                {t('Region of {region}, {culture} culture', { region: region.name, culture: map.cultures[realm.culture]?.name ?? '' })}
               </p>
             </div>
           </div>
@@ -57,26 +58,26 @@ export function Inspector({ map, pick, onClose, onSelectProvince, onChange, onLa
 
         {prov && (
           <dl className="facts">
-            <dt>Terrain</dt>
-            <dd>{TERRAIN_NAMES[prov.terrain]}</dd>
-            <dt>Size</dt>
-            <dd>{prov.hexes.length} hexes</dd>
-            <dt>Coast</dt>
-            <dd>{prov.coastal ? 'Has a coastline' : 'Landlocked'}</dd>
-            <dt>Capital</dt>
-            <dd>{realm && realm.capitalProvince === prov.id ? `Seat of ${realm.name}` : region && region.capitalProvince === prov.id ? `Seat of ${region.name}` : 'Provincial town'}</dd>
+            <dt>{t('Terrain')}</dt>
+            <dd>{t(TERRAIN_NAMES[prov.terrain])}</dd>
+            <dt>{t('Size')}</dt>
+            <dd>{t('{n} hexes', { n: num(prov.hexes.length) })}</dd>
+            <dt>{t('Coast')}</dt>
+            <dd>{t(prov.coastal ? 'Has a coastline' : 'Landlocked')}</dd>
+            <dt>{t('Capital')}</dt>
+            <dd>{realm && realm.capitalProvince === prov.id ? t('Seat of {name}', { name: realm.name }) : region && region.capitalProvince === prov.id ? t('Seat of {name}', { name: region.name }) : t('Provincial town')}</dd>
           </dl>
         )}
 
         {prov && prov.neighbors.length > 0 && (
           <div className="chips">
-            <h3>Borders</h3>
+            <h3>{t('Borders')}</h3>
             {prov.neighbors.map((n) => (
               <button key={n} className="chip" onClick={() => onSelectProvince(n)}>
                 {map.provinces[n].name}
               </button>
             ))}
-            {prov.seaNeighbors.length > 0 && <h3>Across the water</h3>}
+            {prov.seaNeighbors.length > 0 && <h3>{t('Across the water')}</h3>}
             {prov.seaNeighbors.map((n) => (
               <button key={n} className="chip chip--sea" onClick={() => onSelectProvince(n)}>
                 {map.provinces[n].name}
@@ -85,37 +86,35 @@ export function Inspector({ map, pick, onClose, onSelectProvince, onChange, onLa
           </div>
         )}
 
-        <h3>
-          Hex {col}, {row}
-        </h3>
+        <h3>{t('Hex {col}, {row}', { col, row })}</h3>
         <dl className="facts facts--hex">
-          <dt>Axial</dt>
+          <dt>{t('Axial')}</dt>
           <dd>
             q {q}, r {r}
           </dd>
-          <dt>{e >= 0 ? 'Elevation' : 'Depth'}</dt>
-          <dd>{e >= 0 ? `${Math.round(e * ELEVATION_METRES).toLocaleString()} m` : `${Math.round(-e * DEPTH_METRES).toLocaleString()} m`}</dd>
-          <dt>Temperature</dt>
-          <dd>{map.hex.temperature[i].toFixed(1)} °C</dd>
-          <dt>Rainfall</dt>
+          <dt>{t(e >= 0 ? 'Elevation' : 'Depth')}</dt>
+          <dd>{e >= 0 ? `${num(Math.round(e * ELEVATION_METRES))} m` : `${num(Math.round(-e * DEPTH_METRES))} m`}</dd>
+          <dt>{t('Temperature')}</dt>
+          <dd>{num(Math.round(map.hex.temperature[i] * 10) / 10)} °C</dd>
+          <dt>{t('Rainfall')}</dt>
           <dd>{Math.round(map.hex.moisture[i] * 100)}%</dd>
-          <dt>Biome</dt>
-          <dd>{BIOME_NAMES[map.hex.biome[i] as 0]}</dd>
-          <dt>Relief</dt>
-          <dd>{RELIEF_NAMES[map.hex.relief[i] as 0]}</dd>
-          <dt>Terrain</dt>
-          <dd>{TERRAIN_NAMES[map.hex.terrain[i] as 0]}</dd>
+          <dt>{t('Biome')}</dt>
+          <dd>{t(BIOME_NAMES[map.hex.biome[i] as 0])}</dd>
+          <dt>{t('Relief')}</dt>
+          <dd>{t(RELIEF_NAMES[map.hex.relief[i] as 0])}</dd>
+          <dt>{t('Terrain')}</dt>
+          <dd>{t(TERRAIN_NAMES[map.hex.terrain[i] as 0])}</dd>
           {f & HexFlag.River ? (
             <>
-              <dt>River</dt>
-              <dd>{map.rivers.find((rv) => rv.hexes.includes(i))?.name ?? 'Yes'}</dd>
+              <dt>{t('River')}</dt>
+              <dd>{map.rivers.find((rv) => rv.hexes.includes(i))?.name ?? t('Yes')}</dd>
             </>
           ) : null}
         </dl>
 
         {(map.layers ?? []).length > 0 && (
           <>
-            <h3>Game data</h3>
+            <h3>{t('Game data')}</h3>
             <dl className="facts facts--data">
               {map.layers.map((l) => {
                 const idx = l.def.scope === 'hex' ? i : pick.province;
@@ -136,7 +135,7 @@ function LayerValue({ layer, idx, onChange }: { layer: DataLayer; idx: number; o
   const locked = layer.locked[idx] === 1;
   const set = (nv: number | null) =>
     onChange?.(
-      `Set ${def.name}`,
+      t('Set {name}', { name: def.name }),
       (m) => {
         const l = m.layers.find((x) => x.def.id === def.id);
         if (!l) return;
@@ -151,9 +150,9 @@ function LayerValue({ layer, idx, onChange }: { layer: DataLayer; idx: number; o
       'instant',
     );
   const label = (
-    <dt title={def.scope === 'province' ? 'Per province' : 'Per hex'}>
+    <dt title={t(def.scope === 'province' ? 'Per province' : 'Per hex')}>
       {def.name}
-      {def.scope === 'province' && <small> (province)</small>}
+      {def.scope === 'province' && <small> ({t('province')})</small>}
     </dt>
   );
   const fromRollUp = def.scope === 'province' && !!def.rollUp && !locked;
@@ -162,8 +161,8 @@ function LayerValue({ layer, idx, onChange }: { layer: DataLayer; idx: number; o
       <>
         {label}
         <dd>
-          {formatValue(def, v)}
-          {locked && <span className="painted" title="Set by hand"> ✎</span>}
+          {t(formatValue(def, v))}
+          {locked && <span className="painted" title={t('Set by hand')}> ✎</span>}
         </dd>
       </>
     );
@@ -185,7 +184,7 @@ function LayerValue({ layer, idx, onChange }: { layer: DataLayer; idx: number; o
       control = (
         <label className="check check--tight">
           <input type="checkbox" checked={v !== 0} onChange={(e) => set(e.target.checked ? 1 : 0)} aria-label={def.name} />
-          {v ? 'Yes' : 'No'}
+          {t(v ? 'Yes' : 'No')}
         </label>
       );
       break;
@@ -212,11 +211,11 @@ function LayerValue({ layer, idx, onChange }: { layer: DataLayer; idx: number; o
       <dd className="layer-value">
         {control}
         {locked ? (
-          <button type="button" className="icon-btn" title="Set by hand. Click to let the rules decide again." aria-label={`Let the rules decide ${def.name}`} onClick={() => set(null)}>
+          <button type="button" className="icon-btn" title={t('Set by hand. Click to let the rules decide again.')} aria-label={t('Let the rules decide {name}', { name: def.name })} onClick={() => set(null)}>
             ↺
           </button>
         ) : fromRollUp ? (
-          <span className="muted small" title="Worked out from the province's hexes">
+          <span className="muted small" title={t("Worked out from the province's hexes")}>
             Σ
           </span>
         ) : null}
@@ -257,26 +256,28 @@ function EditNames({ map, provinceId, onChange }: { map: MapData; provinceId: nu
   const titles = REALM_TITLES.includes(realm.title) ? REALM_TITLES : [realm.title, ...REALM_TITLES];
   return (
     <div className="names">
-      <NameField label="Province" value={prov.name} onCommit={(v) => onChange('Rename province', (m) => (m.provinces[prov.id].name = v))} />
-      <NameField label="Region" value={region.name} onCommit={(v) => onChange('Rename region', (m) => (m.regions[region.id].name = v))} />
-      <NameField label="Realm" value={realm.name} onCommit={(v) => onChange('Rename realm', (m) => (m.realms[realm.id].name = v))} />
+      <NameField label={t('Province')} value={prov.name} onCommit={(v) => onChange(t('Rename province'), (m) => (m.provinces[prov.id].name = v))} />
+      <NameField label={t('Region')} value={region.name} onCommit={(v) => onChange(t('Rename region'), (m) => (m.regions[region.id].name = v))} />
+      <NameField label={t('Realm')} value={realm.name} onCommit={(v) => onChange(t('Rename realm'), (m) => (m.realms[realm.id].name = v))} />
       <div className="names__row">
         <label className="field">
-          <span>Title</span>
-          <select value={realm.title} onChange={(e) => onChange('Change title', (m) => (m.realms[realm.id].title = e.target.value))}>
-            {titles.map((t) => (
-              <option key={t}>{t}</option>
+          <span>{t('Title')}</span>
+          <select value={realm.title} onChange={(e) => onChange(t('Change title'), (m) => (m.realms[realm.id].title = e.target.value))}>
+            {titles.map((x) => (
+              <option key={x} value={x}>
+                {t(x)}
+              </option>
             ))}
           </select>
         </label>
-        <ColorField color={realm.color} onCommit={(c) => onChange('Recolour realm', (m) => (m.realms[realm.id].color = c))} />
+        <ColorField color={realm.color} onCommit={(c) => onChange(t('Recolour realm'), (m) => (m.realms[realm.id].color = c))} />
       </div>
       <div className="names__actions">
-        <button type="button" className="btn btn--ghost" disabled={region.provinces.length < 2} onClick={() => onChange(`New region from ${prov.name}`, (m) => newRegionFrom(m, prov.id))}>
-          Make {prov.name} a new region
+        <button type="button" className="btn btn--ghost" disabled={region.provinces.length < 2} onClick={() => onChange(t('New region from {name}', { name: prov.name }), (m) => newRegionFrom(m, prov.id))}>
+          {t('Make {name} a new region', { name: prov.name })}
         </button>
-        <button type="button" className="btn btn--ghost" disabled={realm.regions.length < 2} onClick={() => onChange(`Independence for ${region.name}`, (m) => newRealmFrom(m, region.id))}>
-          Make {region.name} an independent realm
+        <button type="button" className="btn btn--ghost" disabled={realm.regions.length < 2} onClick={() => onChange(t('Independence for {name}', { name: region.name }), (m) => newRealmFrom(m, region.id))}>
+          {t('Make {name} an independent realm', { name: region.name })}
         </button>
       </div>
     </div>
@@ -328,7 +329,7 @@ function ColorField({ color, onCommit }: { color: [number, number, number]; onCo
   }, [color]);
   return (
     <label className="field names__color">
-      <span>Colour</span>
+      <span>{t('Colour')}</span>
       <input ref={ref} type="color" />
     </label>
   );

@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
 import type { Quality } from '../render/MapRenderer';
 
@@ -43,16 +44,16 @@ export function TopBar({ quality, onQuality, name, hasMap, onOpen, onSave, expor
         {hasMap && <em className="wordmark__map">{name}</em>}
       </div>
       <div className="topbar__actions">
-        <label className="quality" title="Lower quality draws faster on slower graphics cards">
-          <span>Quality</span>
+        <label className="quality" title={t('Lower quality draws faster on slower graphics cards')}>
+          <span>{t('Quality')}</span>
           <select value={quality} onChange={(e) => onQuality(e.target.value as Quality)}>
-            <option value="high">High</option>
-            <option value="balanced">Balanced</option>
-            <option value="fast">Fast</option>
+            <option value="high">{t('High')}</option>
+            <option value="balanced">{t('Balanced')}</option>
+            <option value="fast">{t('Fast')}</option>
           </select>
         </label>
         <button className="btn btn--ghost" onClick={() => fileInput.current?.click()}>
-          Open
+          {t('Open')}
         </button>
         <input
           ref={fileInput}
@@ -66,11 +67,11 @@ export function TopBar({ quality, onQuality, name, hasMap, onOpen, onSave, expor
           }}
         />
         <button className="btn btn--ghost" onClick={onSave} disabled={!hasMap}>
-          Save
+          {t('Save')}
         </button>
         <div className="menu" ref={menuRef}>
           <button className="btn btn--ghost" onClick={() => setMenu(!menu)} disabled={!hasMap} aria-expanded={menu} aria-haspopup="menu">
-            Export
+            {t('Export')}
           </button>
           {menu && (
             <div className="menu__list" role="menu">

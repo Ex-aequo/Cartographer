@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import type { MapData } from './types';
 import { BIOME_NAMES, HexFlag, TERRAIN_NAMES } from './types';
 import { buildNeighbors } from './hex';
@@ -113,7 +114,7 @@ const SWATCHES: [number, number, number][] = [
 export const swatch = (k: number) => SWATCHES[k % SWATCHES.length];
 
 export function newLayerDef(existing: LayerDef[], type: LayerType, scope: LayerScope, name = ''): LayerDef {
-  const base = name || (type === 'number' ? 'Fertility' : type === 'flag' ? 'Special' : type === 'tags' ? 'Features' : 'Resource');
+  const base = name || t(type === 'number' ? 'Fertility' : type === 'flag' ? 'Special' : type === 'tags' ? 'Features' : 'Resource');
   let id = slug(base);
   for (let k = 2; existing.some((d) => d.id === id); k++) id = `${slug(base)}-${k}`;
   const def: LayerDef = {
@@ -134,9 +135,9 @@ export function newLayerDef(existing: LayerDef[], type: LayerType, scope: LayerS
   };
   if (type === 'category' && !name) {
     def.categories = [
-      { id: 0, name: 'Iron', color: [120, 120, 130] },
-      { id: 1, name: 'Gold', color: [220, 180, 50] },
-      { id: 2, name: 'Horses', color: [150, 100, 60] },
+      { id: 0, name: t('Iron'), color: [120, 120, 130] },
+      { id: 1, name: t('Gold'), color: [220, 180, 50] },
+      { id: 2, name: t('Horses'), color: [150, 100, 60] },
     ];
     def.rules = [
       { id: 'r1', when: [{ field: 'terrain', codes: [7, 8] }], chance: 0.15, value: 0 },
@@ -146,9 +147,9 @@ export function newLayerDef(existing: LayerDef[], type: LayerType, scope: LayerS
   }
   if (type === 'tags' && !name) {
     def.categories = [
-      { id: 0, name: 'Ruins', color: [130, 110, 90] },
-      { id: 1, name: 'Holy site', color: [230, 210, 140] },
-      { id: 2, name: 'Monsters', color: [170, 50, 50] },
+      { id: 0, name: t('Ruins'), color: [130, 110, 90] },
+      { id: 1, name: t('Holy site'), color: [230, 210, 140] },
+      { id: 2, name: t('Monsters'), color: [170, 50, 50] },
     ];
   }
   if (type === 'number' && !name) {
@@ -507,7 +508,7 @@ export function templateOf(defs: LayerDef[]): string {
 
 export function readTemplate(text: string): LayerDef[] {
   const obj = JSON.parse(text);
-  if (obj?.format !== TEMPLATE_FORMAT || !Array.isArray(obj.layers)) throw new Error('This file is not a Cartographer layer template.');
+  if (obj?.format !== TEMPLATE_FORMAT || !Array.isArray(obj.layers)) throw new Error(t('This file is not a Cartographer layer template.'));
   return obj.layers as LayerDef[];
 }
 

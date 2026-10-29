@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { GenParams, MapData } from '../model/types';
 import type { RenderAssets } from '../render/assets';
@@ -43,7 +44,7 @@ export function useMapWorker() {
       else p.reject(new Error(msg.message));
     };
     w.onerror = (e) => {
-      pending.current.forEach((p) => p.reject(new Error(e.message || 'The map worker stopped unexpectedly.')));
+      pending.current.forEach((p) => p.reject(new Error(e.message || t('The map worker stopped unexpectedly.'))));
       pending.current.clear();
       setBusy(null);
     };

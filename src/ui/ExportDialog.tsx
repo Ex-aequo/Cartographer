@@ -1,3 +1,4 @@
+import { t, tn, num, locale } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
 import type { MapData } from '../model/types';
 import type { RenderAssets } from '../render/assets';
@@ -13,12 +14,12 @@ export type DialogPart = 'image' | 'modes' | ExportPart;
 
 /** Every map mode, plus one per custom data layer, as `{ key, name, file }`. */
 export function modeList(map: MapData): { key: MapMode; name: string; file: string }[] {
-  const built = MODES.map((m, i) => ({ key: m.key as MapMode, name: m.label, file: `modes/${String(i + 1).padStart(2, '0')}-${m.key}.png` }));
+  const built = MODES.map((m, i) => ({ key: m.key as MapMode, name: t(m.label), file: `modes/${String(i + 1).padStart(2, '0')}-${m.key}.png` }));
   const layers = (map.layers ?? []).map((l) => ({ key: `layer:${l.def.id}` as MapMode, name: l.def.name, file: `modes/layer-${l.def.id}.png` }));
   return [...built, ...layers];
 }
 
-const PARTS: { key: DialogPart; name: string; files: string }[] = [
+export const PARTS: { key: DialogPart; name: string; files: string }[] = [
   { key: 'image', name: 'Map image', files: 'map.png (the current map mode)' },
   { key: 'modes', name: 'Map modes', files: 'modes/*.png: one image per map mode and per data layer' },
   { key: 'provinces', name: 'Province map', files: 'provinces.png, definition.csv (one colour per province and sea zone)' },
@@ -92,7 +93,7 @@ export function ExportDialog(p: Props) {
       for (const m of chosenModes) {
         const l = m.key.startsWith('layer:') ? p.map.layers.find((x) => `layer:${x.def.id}` === m.key) : undefined;
         const layer = l ? { colors: layerColors(p.map, l), badges: l.def.showIcons ? l : null } : null;
-        const blob = await renderHighRes(p.map, p.assets, { width: modeWidth, look: modeLook, mode: m.key, layer }, (_label, f) => step(`Map mode: ${m.name}`, f));
+        const blob = await renderHighRes(p.map, p.assets, { width: modeWidth, look: modeLook, mode: m.key, layer }, (_label, f) => step(t('Map mode: {name}', { name: m.name }), f));
         files.push({ name: m.file, data: new Uint8Array(await blob.arrayBuffer()) });
         done++;
       }
@@ -101,7 +102,7 @@ export function ExportDialog(p: Props) {
         files.push(...got);
         done++;
       }
-      setBusy({ label: 'Packing', f: 1 });
+      setBusy({ label: t('Packing'), f: 1 });
       if (files.length === 1) {
         const f = files[0];
         p.onDownload(new Blob([f.data as BlobPart], { type: f.name.endsWith('.png') ? 'image/png' : f.name.endsWith('.json') ? 'application/json' : 'text/csv' }), `${p.fileBase}-${f.name}`);
@@ -121,68 +122,68 @@ export function ExportDialog(p: Props) {
     <div className="dialog-backdrop" onMouseDown={(e) => e.target === e.currentTarget && !busy && p.onClose()}>
       <div className="dialog" role="dialog" aria-modal="true" aria-labelledby="export-title">
         <header className="panel__head">
-          <h2 id="export-title">Export</h2>
-          <button className="icon-btn" onClick={p.onClose} aria-label="Close" disabled={!!busy}>
+          <h2 id="export-title">{t('Export')}</h2>
+          <button className="icon-btn" onClick={p.onClose} aria-label={t('Close')} disabled={!!busy}>
             ×
           </button>
         </header>
         <div className="dialog__body">
-          <p className="muted">Choose what to export. One part downloads as a single file; several come together in a zip with a README.</p>
+          <p className="muted">{t('Choose what to export. One part downloads as a single file; several come together in a zip with a README.')}</p>
           {PARTS.map((x, i) => (
             <div key={x.key} className={`export-part ${parts.has(x.key) ? 'is-on' : ''}`}>
               <label className="check">
                 <input ref={i === 0 ? first : undefined} type="checkbox" checked={parts.has(x.key)} onChange={() => toggle(x.key)} />
                 <span>
-                  <strong>{x.name}</strong>
-                  <small>{x.files}</small>
+                  <strong>{t(x.name)}</strong>
+                  <small>{t(x.files)}</small>
                 </span>
               </label>
               {x.key === 'image' && parts.has('image') && (
                 <div className="export-opts">
                   <label className="field">
-                    <span>Style</span>
+                    <span>{t('Style')}</span>
                     <select value={look} onChange={(e) => setLook(e.target.value as LookKey)}>
                       {LOOKS.map((l) => (
                         <option key={l.key} value={l.key}>
-                          {l.name} — {l.hint}
+                          {t(l.name)} — {t(l.hint)}
                         </option>
                       ))}
                     </select>
                   </label>
                   <label className="field">
-                    <span>Size</span>
+                    <span>{t('Size')}</span>
                     <select value={width} onChange={(e) => setWidth(Number(e.target.value))}>
                       {WIDTHS.map((w) => (
                         <option key={w} value={w}>
-                          {w.toLocaleString()} × {highResSize(p.map, w).height.toLocaleString()} px
+                          {w.toLocaleString(locale())} × {highResSize(p.map, w).height.toLocaleString(locale())} px
                         </option>
                       ))}
                     </select>
                   </label>
                   <p className="muted small">
-                    Map mode: {p.modeLabel}. {sharp < 1 ? `At this size the ${LOOKS.find((l) => l.key === look)!.name.toLowerCase()} is softer than on screen; pick a larger size for full detail.` : `${sharp.toFixed(1)}× the detail of your screen.`}
-                    {img.width * img.height > 120e6 ? ' Very large: this needs a lot of memory and may take a minute.' : ''}
+                    {t('Map mode: {name}.', { name: p.modeLabel })} {sharp < 1 ? t('At this size the {style} is softer than on screen; pick a larger size for full detail.', { style: t(LOOKS.find((l) => l.key === look)!.name).toLowerCase() }) : t('{n}× the detail of your screen.', { n: num(Math.round(sharp * 10) / 10) })}
+                    {img.width * img.height > 120e6 ? ' ' + t('Very large: this needs a lot of memory and may take a minute.') : ''}
                   </p>
                 </div>
               )}
               {x.key === 'modes' && parts.has('modes') && (
                 <div className="export-opts">
                   <label className="field">
-                    <span>Style</span>
+                    <span>{t('Style')}</span>
                     <select value={modeLook} onChange={(e) => setModeLook(e.target.value as LookKey)}>
                       {LOOKS.map((l) => (
                         <option key={l.key} value={l.key}>
-                          {l.name} — {l.hint}
+                          {t(l.name)} — {t(l.hint)}
                         </option>
                       ))}
                     </select>
                   </label>
                   <label className="field">
-                    <span>Size</span>
+                    <span>{t('Size')}</span>
                     <select value={modeWidth} onChange={(e) => setModeWidth(Number(e.target.value))}>
                       {[2048, 4096, 8192].map((w) => (
                         <option key={w} value={w}>
-                          {w.toLocaleString()} × {highResSize(p.map, w).height.toLocaleString()} px
+                          {w.toLocaleString(locale())} × {highResSize(p.map, w).height.toLocaleString(locale())} px
                         </option>
                       ))}
                     </select>
@@ -207,31 +208,31 @@ export function ExportDialog(p: Props) {
                     ))}
                   </div>
                   <p className="muted small">
-                    {modes.size} {modes.size === 1 ? 'image' : 'images'}, each drawn like the map image. Data layers are listed after the built-in modes.
+                    {tn('{n} image, drawn like the map image.', '{n} images, each drawn like the map image.', modes.size)} {t('Data layers are listed after the built-in modes.')}
                   </p>
                 </div>
               )}
               {x.key === 'provinces' && parts.has('provinces') && (
                 <div className="export-opts">
                   <label className="field">
-                    <span>Size</span>
+                    <span>{t('Size')}</span>
                     <select value={provWidth} onChange={(e) => setProvWidth(Number(e.target.value))}>
                       {[2048, 4096, 8192].map((w) => (
                         <option key={w} value={w}>
-                          {w.toLocaleString()} × {Math.round((w * p.map.world.height) / p.map.world.width).toLocaleString()} px
+                          {w.toLocaleString(locale())} × {Math.round((w * p.map.world.height) / p.map.world.width).toLocaleString(locale())} px
                         </option>
                       ))}
                     </select>
                   </label>
                   <label className="field">
-                    <span>Borders</span>
+                    <span>{t('Borders')}</span>
                     <select value={smooth ? 'smooth' : 'hex'} onChange={(e) => setSmooth(e.target.value === 'smooth')}>
-                      <option value="hex">Along hex edges (exact game data)</option>
-                      <option value="smooth">As drawn on the map (curved)</option>
+                      <option value="hex">{t('Along hex edges (exact game data)')}</option>
+                      <option value="smooth">{t('As drawn on the map (curved)')}</option>
                     </select>
                   </label>
                   <p className="muted small">
-                    {provWidth.toLocaleString()} × {provH.toLocaleString()} px. Sea and lakes are split into sea zones with their own colours.
+                    {num(provWidth)} × {num(provH)} px. {t('Sea and lakes are split into sea zones with their own colours.')}
                   </p>
                 </div>
               )}
@@ -239,16 +240,16 @@ export function ExportDialog(p: Props) {
           ))}
           {(parts.has('heightmap') || parts.has('terrain')) && (
             <label className="field export-raster">
-              <span>Heightmap and mask size</span>
+              <span>{t('Heightmap and mask size')}</span>
               <select value={rasterWidth} onChange={(e) => setRasterWidth(Number(e.target.value))}>
                 {[1024, 2048, 4096, 8192].map((w) => (
                   <option key={w} value={w}>
-                    {w.toLocaleString()} × {Math.round((w * p.map.world.height) / p.map.world.width).toLocaleString()} px
+                    {w.toLocaleString(locale())} × {Math.round((w * p.map.world.height) / p.map.world.width).toLocaleString(locale())} px
                   </option>
                 ))}
               </select>
               <small className="muted">
-                {rasterWidth.toLocaleString()} × {rasH.toLocaleString()} px
+                {rasterWidth.toLocaleString(locale())} × {rasH.toLocaleString(locale())} px
               </small>
             </label>
           )}
@@ -261,7 +262,7 @@ export function ExportDialog(p: Props) {
         <footer className="dialog__foot">
           {busy ? (
             <div className="dialog__progress" role="status" aria-live="polite">
-              <span>{busy.label}…</span>
+              <span>{t(busy.label)}…</span>
               <div className="veil__bar">
                 <span style={{ transform: `scaleX(${Math.max(0.03, busy.f)})` }} />
               </div>
@@ -269,10 +270,10 @@ export function ExportDialog(p: Props) {
           ) : (
             <>
               <button className="btn btn--ghost" onClick={p.onClose}>
-                Cancel
+                {t('Cancel')}
               </button>
               <button className="btn btn--seal" onClick={go} disabled={!parts.size || (parts.size === 1 && parts.has('modes') && !modes.size)}>
-                {parts.size > 1 ? `Export ${parts.size} parts` : 'Export'}
+                {parts.size > 1 ? t('Export {n} parts', { n: parts.size }) : t('Export')}
               </button>
             </>
           )}
@@ -316,4 +317,4 @@ function readme(
   return lines.join('\n') + '\n';
 }
 
-export const modeLabelOf = (m: MapMode, layers: DataLayer[]) => (m.startsWith('layer:') ? (layers.find((l) => `layer:${l.def.id}` === m)?.def.name ?? 'Layer') : modeDef(m).label);
+export const modeLabelOf = (m: MapMode, layers: DataLayer[]) => (m.startsWith('layer:') ? (layers.find((l) => `layer:${l.def.id}` === m)?.def.name ?? t('Layer')) : t(modeDef(m).label));
