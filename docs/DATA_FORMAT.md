@@ -42,6 +42,7 @@ Two files come out of Cartographer:
   "cultures": [ ... ],
   "rivers":   [ ... ],
   "hexes":    [ ... ],
+  "symbols":  [ ... ]     // symbols pinned to hexes
   "layers":   [ ... ]     // definitions of your custom data layers
 }
 ```
@@ -69,6 +70,7 @@ Two files come out of Cartographer:
 | `edited` | bool | Changed by hand in the editor (height, terrain or river). |
 | `paintedTerrain` | bool | `terrain` was set by hand and overrides the climate. |
 | `data` | object | Values of every per-hex custom layer, keyed by layer id (see *Custom data layers*). |
+| `symbols` | string[] | Names of the symbols pinned to this hex (see *Symbols*). |
 
 Codes are stable: a code is never renumbered, new codes are only added.
 
@@ -156,3 +158,27 @@ one CSV per layer, named `<layer id>.csv`:
 *Save template* writes the layer definitions and rules without any map's
 values (`format: "cartographer-layer-template"`), so the same layers can be
 loaded onto other maps, where the rules fill them from that map's land.
+
+## Symbols
+
+Symbols placed on the map either float (pure decoration, only in images) or
+are **pinned** to a hex (Shift-click when placing, or the *Pinned* box). Pinned
+symbols are game data:
+
+```jsonc
+"symbols": [
+  { "id": 2, "hex": 6127, "symbol": "Ship", "assetId": "ink:ship",
+    "set": "Ink set (built in)", "tags": ["sea", "trade", "military"] }
+]
+```
+
+`id` is stable for the life of the placement. Each hex also lists the names of
+its pinned symbols in `hexes[].symbols`. Use tags on your own pictures (for
+example `dungeon`, `lair`) so a game can treat whole groups alike.
+
+### Symbol set files
+
+*Save set* writes a set with its pictures (`format: "cartographer-symbol-set"`,
+SVG text or PNG data URLs) so it can be loaded into other maps. SVGs are
+cleaned on import and on load: scripts, event handlers, embedded HTML and links
+to other files are removed.

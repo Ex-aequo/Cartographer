@@ -1,3 +1,5 @@
+import { drawSymbols, pictureFor } from './symbols';
+import { assetById, settlementAsset } from '../model/symbols';
 import type { LabelEdit, MapData } from '../model/types';
 import type { CurveLabel, RenderAssets } from './assets';
 import type { View } from './MapRenderer';
@@ -57,12 +59,15 @@ export function drawLabels(
   map: MapData,
   a: RenderAssets,
   selectedLabel: string | null = null,
+  selectedSymbol: number | null = null,
 ): DrawnLabel[] {
   const drawn: DrawnLabel[] = [];
   const edits = map.labels ?? {};
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  // placed symbols sit under the lettering
+  drawSymbols(ctx, cssW, cssH, dpr, view, map, selectedSymbol);
   const z = view.zoom;
   const toScreen = (x: number, y: number): [number, number] => [(x - view.cx) * z + cssW / 2, (y - view.cy) * z + cssH / 2];
   const onScreen = (x: number, y: number, m: number) => x > -m && y > -m && x < cssW + m && y < cssH + m;
@@ -107,7 +112,9 @@ export function drawLabels(
   const iconAlpha = fade(z, 13, 18);
   const iconAt: [number, number, number][] = []; // per province: x, y, half-size
   if (iconAlpha > 0.01) {
-    const realmCapitals = new Set(map.realms.map((r) => r.capitalProvince));
+    const realmCapitals = new Set(map.realms.filter((r) => !r.retired).map((r) => r.capitalProvince));
+    const seats = new Set(map.regions.filter((r) => !r.retired).map((r) => r.capitalProvince));
+    const st = map.symbols?.settlements;
     ctx.globalAlpha = iconAlpha;
     for (const p of map.provinces) {
       if (p.retired || p.capitalHex < 0) continue;
@@ -116,10 +123,19 @@ export function drawLabels(
       if (!onScreen(sx, sy, 30)) continue;
       const cap = realmCapitals.has(p.id);
       const sc = Math.min(1.6, Math.max(0.8, z / 28)) * (cap ? 1.35 : 1);
-      drawKeep(ctx, sx, sy, sc, cap);
-      const hs = 6 * sc;
+      const custom = settlementAsset(map, p.id, cap ? 'capital' : seats.has(p.id) ? 'seat' : 'town');
+      const asset = custom ? assetById(map, custom) : undefined;
+      let hs = 6 * sc;
+      if (asset && st) {
+        // the user's own town mark, centred on the town like the keep
+        const w = 15 * sc * st.scale;
+        const h = (w * asset.h) / Math.max(1, asset.w);
+        const pic = pictureFor(asset, w * dpr, null, st.ink);
+        if (pic) ctx.drawImage(pic, sx - w / 2, sy - h / 2, w, h);
+        hs = Math.max(w, h) / 2;
+      } else drawKeep(ctx, sx, sy, sc, cap);
       iconAt[p.id] = [sx, sy, hs];
-      boxes.push([sx - hs, sy - hs * (cap ? 1.9 : 1), sx + hs, sy + hs]);
+      boxes.push([sx - hs, sy - hs * (cap && !asset ? 1.9 : 1), sx + hs, sy + hs]);
     }
     ctx.globalAlpha = 1;
   }

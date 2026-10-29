@@ -1,5 +1,7 @@
 import type { DataLayer } from '../model/layers';
 import { drawLayerBadges } from '../render/badges';
+import { drawPlacement, setSymbolReadyCallback } from '../render/symbols';
+import type { SymbolBridge } from '../state/useSymbols';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
 import type { LoadedMap } from '../state/useMapWorker';
 import { MapRenderer, ZOOM, hexFactor, type MapMode, type Quality, type View } from '../render/MapRenderer';
@@ -50,12 +52,13 @@ interface Props {
   layerColors: Uint8Array | null;
   /** custom layer whose values are lettered on the map at close zoom */
   badgeLayer: DataLayer | null;
+  symbols: SymbolBridge;
   selected: Pick | null;
   onSelect(p: Pick | null): void;
   onZoom(zoom: number): void;
 }
 
-export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ editor, toolActive, revision, quality, loaded, mode, layerColors, badgeLayer, selected, onSelect, onZoom }, ref) {
+export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ editor, toolActive, revision, quality, loaded, mode, layerColors, badgeLayer, symbols, selected, onSelect, onZoom }, ref) {
   const wrap = useRef<HTMLDivElement>(null);
   const glCanvas = useRef<HTMLCanvasElement>(null);
   const labelCanvas = useRef<HTMLCanvasElement>(null);
@@ -72,6 +75,8 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ edito
   onSelectRef.current = onSelect;
   const editorRef = useRef(editor);
   editorRef.current = editor;
+  const symbolsRef = useRef(symbols);
+  symbolsRef.current = symbols;
   /** world position under the mouse, for the brush outline */
   const pointerWorld = useRef<[number, number] | null>(null);
   /** labels drawn in the last frame, for the label tool */
@@ -93,7 +98,14 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ edito
     }
     r.render({ view: view.current, mode: props.current.mode, selectedProvince: props.current.selected?.province ?? -1, hoveredProvince: hover.current });
     const ctx = labelCanvas.current!.getContext('2d')!;
-    drawnLabels.current = drawLabels(ctx, size.current.w, size.current.h, labelDpr(), view.current, l.map, l.assets, editorRef.current.settings()?.tool === 'label' ? editorRef.current.selectedLabel() : null);
+    const sym = symbolsRef.current;
+    drawnLabels.current = drawLabels(ctx, size.current.w, size.current.h, labelDpr(), view.current, l.map, l.assets, editorRef.current.settings()?.tool === 'label' ? editorRef.current.selectedLabel() : null, sym.active() ? sym.selected() : null);
+    const armed = sym.active() ? sym.armed() : null;
+    if (armed && pointerWorld.current) {
+      // a faint preview of the symbol about to be placed
+      const [px, py] = pointerWorld.current;
+      drawPlacement(ctx, size.current.w, size.current.h, labelDpr(), view.current, l.map, { id: -1, asset: armed.asset, x: px, y: py, hex: -1, ...armed.opts }, false, 0.55);
+    }
     if (props.current.badgeLayer) drawLayerBadges(ctx, size.current.w, size.current.h, labelDpr(), view.current, l.map, props.current.badgeLayer);
     const tool = editorRef.current.settings();
     if (tool) drawEditOverlay(ctx, size.current.w, size.current.h, view.current, l.map, tool, editorRef.current.session, pointerWorld.current);
@@ -173,6 +185,8 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ edito
     },
   }));
 
+  useEffect(() => setSymbolReadyCallback(() => schedule()), [schedule]);
+
   // renderer lifetime
   useEffect(() => {
     const r = new MapRenderer(glCanvas.current!);
@@ -234,6 +248,8 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ edito
     let space = false;
     let holdTimer = 0;
     const tool = () => editorRef.current.settings();
+    let symbolDrag = false;
+    const symbolMode = () => !tool() && symbolsRef.current.active();
     const stopStroke = () => {
       if (!editing) return;
       editing = false;
@@ -292,6 +308,13 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ edito
           editorRef.current.selectLabel(labelKey);
           schedule();
         }
+        if (!t && l && e.button === 0 && !space && symbolMode()) {
+          const { wx, wy } = worldAt(e.clientX, e.clientY);
+          symbolDrag = symbolsRef.current.down(wx, wy, view.current.zoom);
+          panning = !symbolDrag;
+          if (symbolDrag) schedule();
+          return;
+        }
         if (t && l && e.button === 0 && !space && editorRef.current.ready() && (t.tool !== 'label' || labelKey)) {
           const { wx, wy } = worldAt(e.clientX, e.clientY);
           editorRef.current.session.begin(l.map, t, wx, wy, { labelKey: labelKey ?? undefined });
@@ -323,7 +346,17 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ edito
     };
     const onMove = (e: PointerEvent) => {
       const prev = pointers.get(e.pointerId);
-      if (tool()) {
+      if (symbolDrag && prev) {
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        moved += Math.abs(e.clientX - prev.x) + Math.abs(e.clientY - prev.y);
+        if (moved >= 3) {
+          const { wx, wy } = worldAt(e.clientX, e.clientY);
+          symbolsRef.current.move(wx, wy, e.shiftKey);
+        }
+        schedule();
+        return;
+      }
+      if (tool() || symbolMode()) {
         const { wx, wy } = worldAt(e.clientX, e.clientY);
         pointerWorld.current = [wx, wy];
         if (!prev) schedule();
@@ -372,7 +405,18 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ edito
         downAt = null;
         return;
       }
-      if (pointers.size === 0 && downAt && moved < 5 && !tool()) onSelectRef.current(pickAt(e.clientX, e.clientY));
+      if (symbolDrag) {
+        symbolDrag = false;
+        symbolsRef.current.up();
+        downAt = null;
+        schedule();
+        return;
+      }
+      if (pointers.size === 0 && downAt && moved < 5 && symbolMode()) {
+        const { wx, wy } = worldAt(e.clientX, e.clientY);
+        symbolsRef.current.click(wx, wy, view.current.zoom, e.shiftKey);
+        schedule();
+      } else if (pointers.size === 0 && downAt && moved < 5 && !tool()) onSelectRef.current(pickAt(e.clientX, e.clientY));
       if (pointers.size === 0) {
         downAt = null;
         panning = false;
