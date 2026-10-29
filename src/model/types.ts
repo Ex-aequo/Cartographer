@@ -1,4 +1,5 @@
 import type { DataLayer } from './layers';
+import type { SymbolData } from './symbols';
 
 /**
  * Cartographer map data model.
@@ -304,4 +305,6 @@ export interface MapData {
   edits?: EditLayers;
   /** Hand-placed labels (format 3). */
   labels?: Record<string, LabelEdit>;
+  /** Symbols: imported assets and their placements (format 3). */
+  symbols?: SymbolData;
 }

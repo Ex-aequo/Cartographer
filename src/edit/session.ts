@@ -1,3 +1,4 @@
+import { restoreSymbols, snapshotSymbols, type SymbolSnapshot } from '../model/symbols';
 import type { LabelEdit, MapData } from '../model/types';
 import { layersOf, rollUps, runRules, type DataLayer } from '../model/layers';
 import { HexFlag, Terrain, Touched } from '../model/types';
@@ -95,6 +96,7 @@ export interface StepRecord {
   /** 'instant': only labels or data layers changed, nothing to rebuild */
   kind?: 'instant';
   layers?: LayerStep;
+  symbols?: { before: SymbolSnapshot; after: SymbolSnapshot };
   height?: { x: number; y: number; w: number; h: number; before: Float32Array; after: Float32Array };
   terrain?: Diff;
   riverBlock?: Diff;
@@ -138,6 +140,7 @@ export interface ChangeToken {
   coreBefore: PoliticalCore;
   paths: number[][];
   layers: LayerSnapshot;
+  symbols: SymbolSnapshot;
 }
 
 interface LayerArrays {
@@ -379,7 +382,7 @@ export class EditSession {
   /** Two-part change, for controls that adjust live (sliders) and record once at the end. */
   startChange(map: MapData): ChangeToken {
     const e = ensureEdits(map);
-    return { provinceBefore: map.hex.province.slice(), coreBefore: captureCore(map), paths: e.riverPaths.map((p) => p.slice()), layers: snapshotLayers(map) };
+    return { provinceBefore: map.hex.province.slice(), coreBefore: captureCore(map), paths: e.riverPaths.map((p) => p.slice()), layers: snapshotLayers(map), symbols: snapshotSymbols(map) };
   }
 
   finishChange(map: MapData, t: ChangeToken, label: string, kind?: 'instant'): StepRecord | null {
@@ -393,6 +396,8 @@ export class EditSession {
       provinceBefore: t.provinceBefore,
       layers: layerStep(t.layers, map),
     };
+    const symAfter = snapshotSymbols(map);
+    if (symAfter.json !== t.symbols.json || !sameData(symAfter.data, t.symbols.data)) rec.symbols = { before: t.symbols, after: symAfter };
     return isEmpty(rec, map) ? null : rec;
   }
 
@@ -635,7 +640,7 @@ export function captureCore(map: MapData): PoliticalCore {
 }
 
 function isEmpty(rec: StepRecord, map: MapData): boolean {
-  if (rec.height || rec.terrain || rec.riverBlock || rec.layers) return false;
+  if (rec.height || rec.terrain || rec.riverBlock || rec.layers || rec.symbols) return false;
   if (JSON.stringify(rec.riverPathsBefore) !== JSON.stringify(rec.riverPathsAfter)) return false;
   if (rec.provinceBefore && diff(rec.provinceBefore, map.hex.province)) return false;
   return JSON.stringify(rec.coreBefore) === JSON.stringify(captureCore(map));
@@ -667,6 +672,13 @@ function applyStep(map: MapData, rec: StepRecord, side: 'before' | 'after'): voi
   const core = side === 'before' ? rec.coreBefore : rec.coreAfter;
   if (core) applyCore(map, core);
   if (rec.layers) applyLayerStep(map, rec.layers, side);
+  if (rec.symbols) restoreSymbols(map, rec.symbols[side]);
+}
+
+function sameData(a: Map<string, string>, b: Map<string, string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const [k, v] of a) if (b.get(k) !== v) return false;
+  return true;
 }
 
 function diff(a: ArrayLike<number>, b: ArrayLike<number>): Diff | undefined {

@@ -23,12 +23,13 @@ const CLIMATES = [
   { label: 'Warm south, cold north', north: 31, south: -14 },
 ];
 
-export type PanelTab = 'world' | 'edit' | 'data';
+export type PanelTab = 'world' | 'edit' | 'data' | 'symbols';
 
 const TABS: { key: PanelTab; label: string }[] = [
   { key: 'world', label: 'New world' },
   { key: 'edit', label: 'Edit' },
   { key: 'data', label: 'Data' },
+  { key: 'symbols', label: 'Symbols' },
 ];
 
 interface PanelProps {

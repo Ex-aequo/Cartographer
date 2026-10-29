@@ -71,6 +71,21 @@ Requires Node 20 or newer and a browser with WebGL 2.
     with a legend, and letters the values on the map when zoomed in.
   - *Save template* / *Load template* move layer definitions and rules between
     maps. *CSV tables* downloads one table per layer.
+- **Symbols** (left panel, fourth tab): pictures on the map.
+  - The library starts with an ink set drawn for Cartographer (village, city,
+    castle, tower, ruins, mine, port, temple, abbey, lighthouse, camp, cave,
+    sea serpent, kraken, ship, mountain, hills, trees). Add your own SVG or PNG
+    files (up to 2 MB each) with *Add pictures…*, *Add a folder…*, or by
+    dropping them on the panel; name and tag them and group them in sets.
+  - Click a symbol, then click the map to place it; hold Shift to snap it to a
+    hex and pin it there (pinned symbols are exported as game data). With no
+    symbol chosen, click a placed one to select it, drag to move it; size,
+    turn, opacity, mirror, tint, ink look and the zoom levels it shows at are
+    in the panel. Delete removes it.
+  - *Town marks* replace the standard keep at every town: by importance (realm
+    capitals, region seats, other towns), by realm, or by culture.
+  - *Save set* / *Load set* move a set, pictures included, between maps.
+    Everything is stored in the `.cartomap` file.
 - **Inspector**: click any province to see its realm, region, terrain,
   neighbours, the data of the hex under the cursor, and its custom layer
   values (editable while the Edit or Data tab is open).
@@ -110,8 +125,9 @@ clicks always land on the province you see.
    - **3a (done)**: edit panel, undo and redo, land and water tools.
    - **3b (done)**: border and naming tools (reassign hexes, split and
      merge provinces, regions and realms, names, titles, colours, labels).
-   - **3c (this release)**: custom data layers with auto-fill rules,
+   - **3c (done)**: custom data layers with auto-fill rules,
      painting, province roll-ups, templates and CSV export.
-   - 3d: your own SVG and PNG assets.
+   - **3d (this release)**: symbols: the built-in ink set and your own SVG and
+     PNG pictures, placing, pinning, town marks, symbol sets.
 4. **Phase 4**: full export set (tiled high-resolution images, province ID
    image, heightmap and masks, CSV) and a desktop build.

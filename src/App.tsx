@@ -5,6 +5,8 @@ import { MapView, type MapViewHandle, type Pick } from './ui/MapView';
 import { SidePanel, WorldPanel, type PanelTab } from './ui/WorldPanel';
 import { EditPanel } from './ui/EditPanel';
 import { DataPanel } from './ui/DataPanel';
+import { SymbolsPanel } from './ui/SymbolsPanel';
+import { useSymbols } from './state/useSymbols';
 import { layerColors, layerCsv } from './model/layers';
 import { zip } from './util/zip';
 import { useEditor } from './state/useEditor';
@@ -48,9 +50,14 @@ export function App() {
   const editor = useEditor(loaded, setLoaded, rederive, onEditError);
   const { setSettings, undo, redo } = editor;
   const [activeLayer, setActiveLayer] = useState<string | null>(null);
+  const sym = useSymbols(loaded, editor, tab === 'symbols');
   const changeTab = (t: PanelTab) => {
     setTab(t);
-    if (t !== tab) setSettings((s) => ({ ...s, tool: null }));
+    if (t !== tab) {
+      setSettings((s) => ({ ...s, tool: null }));
+      sym.setArmed(null);
+      sym.setSelected(null);
+    }
   };
 
   // the custom layer shown as the map mode, if any
@@ -68,10 +75,20 @@ export function App() {
     [loaded, shownLayer, editor.revision],
   );
 
+  const symRef = useRef(sym);
+  symRef.current = sym;
   // editing shortcuts
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement)?.closest('input, select, textarea')) return;
+      const target = e.target as HTMLElement;
+      // Delete still removes a selected symbol while a slider or menu of its panel has focus
+      const typing = target?.closest('textarea, input:not([type=range]):not([type=checkbox]):not([type=color])');
+      if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && symRef.current.selected !== null) {
+        e.preventDefault();
+        symRef.current.remove();
+        return;
+      }
+      if (target?.closest('input, select, textarea')) return;
       const mod = e.ctrlKey || e.metaKey;
       if (mod && e.key.toLowerCase() === 'z') {
         e.preventDefault();
@@ -84,6 +101,8 @@ export function App() {
         setSettings((s) => ({ ...s, radius: Math.min(20, Math.max(0.6, s.radius * (e.key === ']' ? 1.25 : 0.8))) }));
       } else if (e.key === 'Escape') {
         setSettings((s) => (s.tool ? { ...s, tool: null } : s));
+        symRef.current.setArmed(null);
+        symRef.current.setSelected(null);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -173,7 +192,7 @@ export function App() {
 
   return (
     <div className="app">
-      <MapView ref={viewRef} editor={editor.bridge} toolActive={!!editor.settings.tool} revision={editor.revision} quality={quality} loaded={loaded} mode={mode} layerColors={shownColors} badgeLayer={shownLayer?.def.showIcons ? shownLayer : null} selected={pick} onSelect={setPick} onZoom={setZoom} />
+      <MapView ref={viewRef} editor={editor.bridge} toolActive={!!editor.settings.tool || (tab === 'symbols' && !!sym.armed)} revision={editor.revision} quality={quality} loaded={loaded} mode={mode} layerColors={shownColors} badgeLayer={shownLayer?.def.showIcons ? shownLayer : null} symbols={sym.bridge} selected={pick} onSelect={setPick} onZoom={setZoom} />
       <TopBar quality={quality} onQuality={changeQuality} name={loaded?.map.meta.params.seed ?? ''} hasMap={!!loaded} onOpen={onOpen} onSave={onSave}
         exports={[
           { label: 'Game data', hint: 'Hexes, provinces, realms and layers as JSON', run: onExportData },
@@ -184,6 +203,25 @@ export function App() {
       <SidePanel tab={tab} onTab={changeTab}>
         {tab === 'world' ? (
           <WorldPanel params={params} onChange={setParams} onGenerate={draw} busy={!!busy} hasEdits={editor.hasEdits} />
+        ) : tab === 'symbols' ? (
+          loaded && (
+            <SymbolsPanel
+              map={loaded.map}
+              revision={editor.revision}
+              change={editor.change}
+              armed={sym.armed}
+              onArm={sym.setArmed}
+              opts={sym.opts}
+              onOpts={sym.setOpts}
+              selected={sym.selectedPlacement}
+              onAdjust={sym.adjust}
+              onAdjustEnd={sym.endAdjust}
+              onDelete={sym.remove}
+              onDeselect={() => sym.setSelected(null)}
+              onDownload={download}
+              notify={setError}
+            />
+          )
         ) : tab === 'data' ? (
           loaded && (
             <DataPanel

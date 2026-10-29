@@ -117,6 +117,29 @@ export function useEditor(loaded: LoadedMap | null, setLoaded: (l: LoadedMap) =>
     [complete, session],
   );
 
+  // live changes from drags and sliders (symbols): change now, record once at the end
+  const liveToken = useRef<ChangeToken | null>(null);
+  const live = useCallback(
+    (mutate: (map: MapData) => void) => {
+      const cur = loadedRef.current;
+      if (!cur) return;
+      if (!liveToken.current) liveToken.current = session.startChange(cur.map);
+      mutate(cur.map);
+      refresh();
+    },
+    [session],
+  );
+  const endLive = useCallback(
+    (label: string) => {
+      const cur = loadedRef.current;
+      const t = liveToken.current;
+      liveToken.current = null;
+      if (!cur || !t) return;
+      complete(session.finishChange(cur.map, t, label, 'instant'));
+    },
+    [complete, session],
+  );
+
   const replay = useCallback(
     (dir: 'undo' | 'redo') => {
       const cur = loadedRef.current;
@@ -161,6 +184,8 @@ export function useEditor(loaded: LoadedMap | null, setLoaded: (l: LoadedMap) =>
     change,
     adjustLabel,
     endAdjustLabel,
+    live,
+    endLive,
     selectedLabel,
     setSelectedLabel,
     revision,
