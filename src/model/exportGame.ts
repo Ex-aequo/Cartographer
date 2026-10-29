@@ -43,6 +43,8 @@ export function buildGameExport(map: MapData) {
         riverFlow: f & HexFlag.River ? round(map.hex.flux[i], 1) : 0,
         flowsTo: map.hex.flowTo[i],
         province: map.hex.province[i],
+        edited: map.edits ? map.edits.touched[i] !== 0 : false,
+        paintedTerrain: map.edits && map.edits.terrain[i] >= 0,
       });
     }
   }
@@ -54,8 +56,14 @@ export function buildGameExport(map: MapData) {
     grid: { cols, rows, layout: map.grid.layout, hexRadius: 1, worldWidth: round(map.world.width, 3), worldHeight: round(map.world.height, 3) },
     terrainTypes: Object.entries(TERRAIN_NAMES).map(([code, name]) => ({ code: Number(code), name })),
     biomeTypes: Object.entries(BIOME_NAMES).map(([code, name]) => ({ code: Number(code), name })),
+    retired: {
+      provinces: map.provinces.filter((p) => p.retired).map((p) => p.id),
+      regions: map.regions.filter((r) => r.retired).map((r) => r.id),
+      realms: map.realms.filter((r) => r.retired).map((r) => r.id),
+    },
     realms: map.realms.map((r) => ({
       id: r.id,
+      retired: !!r.retired,
       name: r.name,
       title: r.title,
       culture: r.culture,
@@ -63,9 +71,10 @@ export function buildGameExport(map: MapData) {
       capitalProvince: r.capitalProvince,
       regions: r.regions,
     })),
-    regions: map.regions.map((g) => ({ id: g.id, name: g.name, realm: g.realm, capitalProvince: g.capitalProvince, provinces: g.provinces })),
+    regions: map.regions.map((g) => ({ id: g.id, retired: !!g.retired, name: g.name, realm: g.realm, capitalProvince: g.capitalProvince, provinces: g.provinces })),
     provinces: map.provinces.map((p) => ({
       id: p.id,
+      retired: !!p.retired,
       name: p.name,
       region: p.region,
       realm: map.regions[p.region].realm,

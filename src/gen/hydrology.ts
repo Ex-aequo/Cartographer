@@ -1,4 +1,4 @@
-import type { Field, GenParams, HexLayers, River } from '../model/types';
+import type { EditLayers, Field, GenParams, HexLayers, River } from '../model/types';
 import { Biome, HexFlag, Relief } from '../model/types';
 import { buildNeighbors, hexCenterX, hexCenterY, sampleField, type Grid } from '../model/hex';
 import { MinHeap } from '../util/heap';
@@ -11,7 +11,23 @@ import { Simplex2, smoothstep } from '../util/noise';
  * water bodies, lakes, drainage, rivers, biome, relief and terrain.
  * Lakes are carved back into the heightfield so the art matches the data.
  */
-export function buildHexes(p: GenParams, grid: Grid, height: Field, baseTemp: Field, moisture: Field, rngRoot: Rng): { hex: HexLayers; nbr: Int32Array; rivers: River[] } {
+export interface HexBuildOptions {
+  /** Turn enclosed depressions into lakes (generation only; edits make lakes by hand). */
+  autoLakes?: boolean;
+  edits?: EditLayers;
+}
+
+export function buildHexes(
+  p: GenParams,
+  grid: Grid,
+  height: Field,
+  baseTemp: Field,
+  moisture: Field,
+  rngRoot: Rng,
+  opts: HexBuildOptions = {},
+): { hex: HexLayers; nbr: Int32Array; rivers: River[] } {
+  const autoLakes = opts.autoLakes ?? true;
+  const edits = opts.edits;
   const n = grid.cols * grid.rows;
   const nbr = buildNeighbors(grid);
   const hex: HexLayers = {
@@ -134,7 +150,8 @@ export function buildHexes(p: GenParams, grid: Grid, height: Field, baseTemp: Fi
   const cand = new Uint8Array(n);
   for (const i of order) if (hex.flags[i] & HexFlag.Land && filled[i] - route[i] > 0.02) cand[i] = 1;
   const lseen = new Uint8Array(n);
-  let lakeBudget = Math.round((n / 4000) * (0.6 + p.rainfall * 0.6));
+  const newLake = new Uint8Array(n);
+  let lakeBudget = autoLakes ? Math.round((n / 4000) * (0.6 + p.rainfall * 0.6)) : 0;
   for (let s = 0; s < n && lakeBudget > 0; s++) {
     if (!cand[s] || lseen[s]) continue;
     const comp: number[] = [];
@@ -154,16 +171,18 @@ export function buildHexes(p: GenParams, grid: Grid, height: Field, baseTemp: Fi
     if (comp.length >= 2 && comp.length <= 40 && rng.chance(0.85)) {
       for (const i of comp) {
         isLake[i] = 1;
+        newLake[i] = 1;
         hex.flags[i] &= ~HexFlag.Land;
       }
       lakeBudget--;
     }
   }
 
-  // Lakes are water; carve them into the art heightfield as smooth basins.
+  // New lakes are carved into the art heightfield as smooth basins (lakes
+  // that are already water in the heightfield are left as they are).
   const lakeCenters: [number, number][] = [];
   for (let i = 0; i < n; i++) {
-    if (!isLake[i]) continue;
+    if (!newLake[i]) continue;
     hex.elevation[i] = -0.04;
     lakeCenters.push([hexCenterX(i % grid.cols, Math.floor(i / grid.cols)), hexCenterY(Math.floor(i / grid.cols))]);
   }
@@ -176,14 +195,79 @@ export function buildHexes(p: GenParams, grid: Grid, height: Field, baseTemp: Fi
     }
   }
 
-  // --- Flow accumulation (process from highest filled level down).
+  // --- Hand-drawn rivers: their hexes drain along the drawn path, and the
+  // end of the path drains on to the sea without ever running back into it.
+  const forced = new Uint8Array(n);
+  if (edits) {
+    const chainHits = (start: number, avoid: Set<number>) => {
+      for (let j = start, g = 0; j >= 0 && !isOcean[j] && g < n; g++, j = hex.flowTo[j]) if (avoid.has(j)) return true;
+      return false;
+    };
+    for (const raw of edits.riverPaths) {
+      // the land part of the path, plus the water hex it runs into (if any)
+      let m = 0;
+      while (m < raw.length && hex.flags[raw[m]] & HexFlag.Land) m++;
+      if (m === 0) continue;
+      const path = raw.slice(0, m);
+      for (const h of path) forced[h] = 1;
+      const inPath = new Set(path);
+      const end = path[m - 1];
+      if (m < raw.length && isNeighbor(nbr, end, raw[m])) {
+        hex.flowTo[end] = raw[m];
+      } else if (chainHits(hex.flowTo[end], inPath)) {
+        // the land around the end drains back up the path: lead it out the shortest way
+        const parent = new Map<number, number>([[end, -1]]);
+        const queue = [end];
+        let exit = -1;
+        for (let q = 0; q < queue.length && exit < 0 && q < 4000; q++) {
+          const i = queue[q];
+          for (let d = 0; d < 6 && exit < 0; d++) {
+            const j = nbr[i * 6 + d];
+            if (j < 0 || parent.has(j) || inPath.has(j)) continue;
+            parent.set(j, i);
+            const route = new Set<number>(inPath);
+            for (let r = i; r >= 0; r = parent.get(r)!) route.add(r);
+            if (!(hex.flags[j] & HexFlag.Land) || !chainHits(hex.flowTo[j], route)) exit = j;
+            else queue.push(j);
+          }
+        }
+        if (exit >= 0) for (let r = exit; parent.get(r)! >= 0; r = parent.get(r)!) hex.flowTo[parent.get(r)!] = r;
+      }
+      for (let k = m - 2; k >= 0; k--) hex.flowTo[path[k]] = path[k + 1];
+    }
+  }
+
+  // --- Drainage order: every hex after everything that drains into it.
+  const indeg = new Int32Array(n);
+  for (const i of order) {
+    const t = hex.flowTo[i];
+    if (t >= 0 && !isOcean[t]) indeg[t]++;
+  }
+  const topo: number[] = [];
+  for (const i of order) if (indeg[i] === 0) topo.push(i);
+  for (let q = 0; q < topo.length; q++) {
+    const t = hex.flowTo[topo[q]];
+    if (t >= 0 && !isOcean[t] && --indeg[t] === 0) topo.push(t);
+  }
+
+  // --- Flow accumulation.
   const precip = new Float32Array(n);
   for (let i = 0; i < n; i++) if (!isOcean[i]) precip[i] = 0.25 + hex.moisture[i] * 1.6;
-  const sorted = order.slice().sort((a, b) => filled[b] - filled[a]);
-  for (const i of sorted) {
+  for (const i of topo) {
     hex.flux[i] += precip[i];
     const t = hex.flowTo[i];
     if (t >= 0 && !isOcean[t]) hex.flux[t] += hex.flux[i];
+    // a drawn river carries on downstream
+    if (forced[i] && t >= 0 && hex.flags[t] & HexFlag.Land) forced[t] = 1;
+  }
+  // an erased hex takes everything upstream of it with it
+  const blocked = new Uint8Array(n);
+  if (edits) {
+    for (let q = topo.length - 1; q >= 0; q--) {
+      const i = topo[q];
+      const t = hex.flowTo[i];
+      if (edits.riverBlock[i] || (t >= 0 && hex.flags[t] & HexFlag.Land && blocked[t])) blocked[i] = 1;
+    }
   }
 
   // --- Rivers: hexes whose flow passes the threshold.
@@ -192,7 +276,7 @@ export function buildHexes(p: GenParams, grid: Grid, height: Field, baseTemp: Fi
   landFlux.sort((a, b) => a - b);
   const threshold = Math.max(14, landFlux[Math.floor(landFlux.length * 0.935)] ?? 14);
   const isRiver = new Uint8Array(n);
-  for (let i = 0; i < n; i++) if (hex.flags[i] & HexFlag.Land && hex.flux[i] >= threshold) isRiver[i] = 1;
+  for (let i = 0; i < n; i++) if (hex.flags[i] & HexFlag.Land && (hex.flux[i] >= threshold || forced[i]) && !blocked[i]) isRiver[i] = 1;
   const hasRiverUpstream = new Uint8Array(n);
   for (let i = 0; i < n; i++) if (isRiver[i] && hex.flowTo[i] >= 0) hasRiverUpstream[hex.flowTo[i]] = 1;
   const sources: number[] = [];
@@ -213,7 +297,7 @@ export function buildHexes(p: GenParams, grid: Grid, height: Field, baseTemp: Fi
       marked.push(i);
       i = hex.flowTo[i];
     }
-    if (path.length >= 4) {
+    if (path.length >= 4 || (path.length >= 2 && forced[s])) {
       rivers.push({ id: rivers.length, name: '', hexes: path });
       for (const k of marked) hex.flags[k] |= HexFlag.River;
     } else {
@@ -244,6 +328,8 @@ export function buildHexes(p: GenParams, grid: Grid, height: Field, baseTemp: Fi
     }
     const fertile = !!(hex.flags[i] & HexFlag.River) && hex.temperature[i] > 6 && hex.temperature[i] < 28;
     hex.terrain[i] = terrainFor(hex.biome[i], hex.relief[i], fertile);
+    // painted terrain wins on land
+    if (edits && edits.terrain[i] >= 0 && hex.flags[i] & HexFlag.Land) hex.terrain[i] = edits.terrain[i];
   }
 
   enforceCoasts(height, grid, hex);
@@ -256,7 +342,11 @@ export function buildHexes(p: GenParams, grid: Grid, height: Field, baseTemp: Fi
  * well inside the hex, so neighbouring hexes never compete.
  */
 function enforceCoasts(f: Field, grid: Grid, hex: HexLayers): void {
-  const R = 0.72;
+  // Full strength over everything the centre checks below read (bilinear
+  // footprint ≤ 0.77), fading out before the hex edge (0.866). Full strength
+  // matters: a partial blend would creep a little further on every rebuild.
+  const R = 0.86;
+  const FULL = 0.78;
   const LEVEL = 0.006;
   for (let i = 0; i < grid.cols * grid.rows; i++) {
     const land = (hex.flags[i] & HexFlag.Land) !== 0;
@@ -280,7 +370,7 @@ function enforceCoasts(f: Field, grid: Grid, hex: HexLayers): void {
     for (let j = j0; j <= j1; j++)
       for (let k = i0; k <= i1; k++) {
         const d = Math.hypot((k + 0.5) / f.res - cx, (j + 0.5) / f.res - cy);
-        const w = 1 - smoothstep(0.38, R, d);
+        const w = 1 - smoothstep(FULL, R, d);
         if (w <= 0) continue;
         const idx = j * f.w + k;
         const h = f.data[idx];
@@ -294,6 +384,11 @@ function enforceCoasts(f: Field, grid: Grid, hex: HexLayers): void {
  * lake hexes merge into one smooth body, and a little noise keeps the shore
  * from looking machine-made. Land hex centres stay land.
  */
+function isNeighbor(nbr: Int32Array, a: number, b: number): boolean {
+  for (let d = 0; d < 6; d++) if (nbr[a * 6 + d] === b) return true;
+  return false;
+}
+
 function carveLakes(f: Field, centers: [number, number][], rng: Rng): void {
   if (!centers.length) return;
   const noise = new Simplex2(rng.fork('lake-shore'));

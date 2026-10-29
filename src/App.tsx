@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DEFAULT_PARAMS, type GenParams } from './model/types';
 import { useMapWorker, type LoadedMap } from './state/useMapWorker';
 import { MapView, type MapViewHandle, type Pick } from './ui/MapView';
-import { WorldPanel } from './ui/WorldPanel';
+import { SidePanel, WorldPanel, type PanelTab } from './ui/WorldPanel';
+import { EditPanel } from './ui/EditPanel';
+import { useEditor } from './state/useEditor';
 import { Inspector } from './ui/Inspector';
 import { Legend, ModeSwitch, Veil, ZoomLadder } from './ui/Controls';
 import { TopBar } from './ui/TopBar';
@@ -13,7 +15,8 @@ import { gzip, mapToJSON } from './model/serialize';
 import { buildGameExport } from './model/exportGame';
 
 export function App() {
-  const { generate, open, busy } = useMapWorker();
+  const { generate, open, rederive, busy } = useMapWorker();
+  const [tab, setTab] = useState<PanelTab>('world');
   const [params, setParams] = useState<GenParams>(DEFAULT_PARAMS);
   const [loaded, setLoaded] = useState<LoadedMap | null>(null);
   const [mode, setMode] = useState<MapMode>('political');
@@ -38,6 +41,35 @@ export function App() {
   const [zoom, setZoom] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const viewRef = useRef<MapViewHandle>(null);
+  const onEditError = useCallback((m: string) => setError(m), []);
+  const editor = useEditor(loaded, setLoaded, rederive, onEditError);
+  const { setSettings, undo, redo } = editor;
+  const changeTab = (t: PanelTab) => {
+    setTab(t);
+    if (t !== 'edit') setSettings((s) => ({ ...s, tool: null }));
+  };
+
+  // editing shortcuts
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement)?.closest('input, select, textarea')) return;
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+      } else if (mod && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        redo();
+      } else if (e.key === '[' || e.key === ']') {
+        setSettings((s) => ({ ...s, radius: Math.min(20, Math.max(0.6, s.radius * (e.key === ']' ? 1.25 : 0.8))) }));
+      } else if (e.key === 'Escape') {
+        setSettings((s) => (s.tool ? { ...s, tool: null } : s));
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [undo, redo, setSettings]);
   // only list the categories that actually occur in this world
   const presentCodes = useMemo(() => {
     if (!loaded || (mode !== 'biome' && mode !== 'terrain')) return undefined;
@@ -106,14 +138,33 @@ export function App() {
       setUniform: (n: string, v: number) => viewRef.current?.setUniform(n, v),
       select: (p: Pick | null) => setPick(p),
       generate: (p: Partial<GenParams>) => draw({ ...DEFAULT_PARAMS, ...p }),
+      editor: () => editor,
+      setTab: changeTab,
     };
-  }, [loaded, draw]);
+  });
 
   return (
     <div className="app">
-      <MapView ref={viewRef} quality={quality} loaded={loaded} mode={mode} selected={pick} onSelect={setPick} onZoom={setZoom} />
+      <MapView ref={viewRef} editor={editor.bridge} toolActive={!!editor.settings.tool} quality={quality} loaded={loaded} mode={mode} selected={pick} onSelect={setPick} onZoom={setZoom} />
       <TopBar quality={quality} onQuality={changeQuality} name={loaded?.map.meta.params.seed ?? ''} hasMap={!!loaded} onOpen={onOpen} onSave={onSave} onExportData={onExportData} onExportImage={onExportImage} />
-      <WorldPanel params={params} onChange={setParams} onGenerate={draw} busy={!!busy} />
+      <SidePanel tab={tab} onTab={changeTab}>
+        {tab === 'world' ? (
+          <WorldPanel params={params} onChange={setParams} onGenerate={draw} busy={!!busy} hasEdits={editor.hasEdits} />
+        ) : (
+          <EditPanel
+            settings={editor.settings}
+            onSettings={setSettings}
+            working={editor.working}
+            canUndo={editor.canUndo}
+            canRedo={editor.canRedo}
+            undoLabel={editor.undoLabel}
+            redoLabel={editor.redoLabel}
+            onUndo={undo}
+            onRedo={redo}
+            editedHexes={editor.editedHexes}
+          />
+        )}
+      </SidePanel>
       {loaded && pick && (
         <Inspector
           map={loaded.map}

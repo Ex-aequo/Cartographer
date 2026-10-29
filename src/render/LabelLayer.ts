@@ -50,6 +50,7 @@ export function drawLabels(ctx: CanvasRenderingContext2D, cssW: number, cssH: nu
     const realmCapitals = new Set(map.realms.map((r) => r.capitalProvince));
     ctx.globalAlpha = iconAlpha;
     for (const p of map.provinces) {
+      if (p.retired || p.capitalHex < 0) continue;
       const row = Math.floor(p.capitalHex / map.grid.cols);
       const [sx, sy] = toScreen(hexCenterX(p.capitalHex % map.grid.cols, row), hexCenterY(row));
       if (!onScreen(sx, sy, 30)) continue;

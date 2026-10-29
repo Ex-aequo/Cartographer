@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { MapData } from '../model/types';
 import type { RenderAssets } from './assets';
-import { BORDER_SIGMA2, COAST_SCALE, ID_RES } from './assets';
+import { BORDER_SIGMA2, COAST_SCALE } from './assets';
 import { LAPSE } from '../gen/biomes';
 import { categoriesFor, modeDef, rampFor, type MapMode } from './mapModes';
 export type { MapMode } from './mapModes';
@@ -100,6 +100,7 @@ export class MapRenderer {
         uGrid: { value: new THREE.Vector2(1, 1) },
         tHexAux: { value: null },
         tFarm: { value: null },
+        tPaint: { value: null },
         uFarmSpan: { value: new THREE.Vector2(1, 1) },
         tHexData: { value: null },
         tWarp: { value: null },
@@ -108,7 +109,7 @@ export class MapRenderer {
         uWarpAmt: { value: 1 },
         tDist: { value: null },
         uIdSpan: { value: new THREE.Vector2(1, 1) },
-        uIdRes: { value: ID_RES },
+        uIdRes: { value: 3 },
         uCoastScale: { value: COAST_SCALE },
         tPalette: { value: null },
         uPaletteSize: { value: 1 },
@@ -150,6 +151,7 @@ export class MapRenderer {
 
     const height = new THREE.DataTexture(map.height.data, map.height.w, map.height.h, THREE.RedFormat, THREE.FloatType);
     linear(height);
+    this.heightTex = height;
     u.tHeight.value = height;
     u.uHeightSpan.value.set(map.height.w / map.height.res, map.height.h / map.height.res);
 
@@ -186,10 +188,15 @@ export class MapRenderer {
     linear(warp);
     u.tWarp.value = warp;
     u.uWarpSize.value.set(a.warpW, a.warpH);
-    const dist = new THREE.DataTexture(a.distData, a.idW, a.idH, THREE.RGBAFormat, THREE.UnsignedByteType);
+    const dist = new THREE.DataTexture(a.coast, a.coastW, a.coastH, THREE.RedFormat, THREE.UnsignedByteType);
+    dist.unpackAlignment = 1;
     linear(dist);
     u.tDist.value = dist;
-    u.uIdSpan.value.set(a.idW / ID_RES, a.idH / ID_RES);
+    u.uIdSpan.value.set(a.coastW / a.coastRes, a.coastH / a.coastRes);
+    u.uIdRes.value = a.coastRes;
+    const paint = new THREE.DataTexture(a.paint, a.farmW, a.farmH, THREE.RGBAFormat, THREE.FloatType);
+    linear(paint);
+    u.tPaint.value = paint;
 
     const palCount = a.realmPalette.length / 4;
     const pal = new THREE.DataTexture(a.realmPalette, palCount, 1, THREE.RGBAFormat, THREE.UnsignedByteType);
@@ -197,7 +204,7 @@ export class MapRenderer {
     pal.needsUpdate = true;
     u.tPalette.value = pal;
     u.uPaletteSize.value = palCount;
-    this.textures.push(height, climate, hexTex, hexAux, hexData, farm, warp, dist, pal);
+    this.textures.push(height, climate, hexTex, hexAux, hexData, farm, paint, warp, dist, pal);
 
     if (this.riverMesh) {
       this.scene.remove(this.riverMesh);
@@ -243,6 +250,12 @@ export class MapRenderer {
   }
 
   private lastMode: MapMode | null = null;
+  private heightTex: THREE.DataTexture | null = null;
+
+  /** The heightfield was edited in place: upload it again before the next frame. */
+  heightChanged(): void {
+    if (this.heightTex) this.heightTex.needsUpdate = true;
+  }
 
   private applyMode(m: MapMode): void {
     this.lastMode = m;

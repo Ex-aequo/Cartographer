@@ -34,6 +34,17 @@ Requires Node 20 or newer and a browser with WebGL 2.
   alone. Elevation, Temperature, Rainfall, Biome and Terrain type show the
   exact game value of every hex, with a legend.
 - **Quality** (top bar): High, Balanced or Fast, for slower graphics cards.
+- **Edit** (left panel, second tab): reshape the world by hand.
+  - *Land*: Raise land, Lower land, Smooth, Flatten, Paint terrain.
+  - *Water*: Draw river (from source to the sea; the land is cut so water runs
+    downhill along your line), Erase river (removes it from there up to its
+    sources), Fill lake, Drain.
+  - After each stroke the map rebuilds: coasts, rainfall and rain shadows,
+    rivers, biomes, terrain, provinces and borders. Land that rises from the
+    sea joins the nearest province (or becomes a new one); a province whose land
+    is all flooded is retired, and its id is never reused.
+  - Undo and redo cover every stroke, 100 steps deep. Edits are saved in the
+    `.cartomap` file and marked in the game-data export.
 - **Inspector**: click any province to see its realm, region, terrain,
   neighbours, and the data of the hex under the cursor.
 - **Save / Open**: `.cartomap` project files (gzip JSON) keep the full world.
@@ -41,7 +52,9 @@ Requires Node 20 or newer and a browser with WebGL 2.
   (see [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md)).
 - **Export → Image of this view**: PNG of the current view, labels included.
 
-Keyboard: arrow keys pan, + and − zoom, Escape clears the selection.
+Keyboard: arrow keys pan, + and − zoom, Escape puts the tool down or clears the
+selection, Ctrl+Z undo, Ctrl+Shift+Z (or Ctrl+Y) redo, [ and ] brush size.
+While a tool is active, right-drag or hold Space to move the map.
 
 ## How it is built
 
@@ -50,6 +63,7 @@ Keyboard: arrow keys pan, + and − zoom, Escape clears the selection.
 | Generator | `src/gen/` | Seeded heightfield (templates, ranges, domain warp), droplet hydraulic erosion, wind-driven rainfall, priority-flood drainage, rivers and lakes, Whittaker-style biomes, provinces by weighted growth, regions and realms by graph clustering, culture-flavoured names. Runs in a Web Worker. |
 | Data model | `src/model/` | Pointy-top odd-r hex grid, typed-array layers, versioned project format, game export. |
 | Renderer | `src/render/` | Three.js with one full-screen GLSL shader: paper and terrain looks, biome colour, slope-following gully relief, tree canopy, farmland, water, analytic smooth borders, data map modes, meandering river ribbons, canvas lettering with collision checks. |
+| Editing | `src/edit/`, `src/gen/rederive.ts` | Brushes work on the heightfield and edit layers in place (live redraw while dragging); each stroke is one undo step stored as a diff. A deterministic rebuild in the worker re-derives everything from heightfield + edits and repairs the political map without renumbering ids. |
 | UI | `src/ui/` | React. |
 
 Borders are computed in the shader from a Gaussian vote of nearby hexes, the
@@ -60,12 +74,15 @@ clicks always land on the province you see.
 
 1. **Phase 1 (done)**: generator, data model, World and Province views,
    save, open, game-data export.
-2. **Phase 2 (this release)**: erosion and carved mountains, Realm view with
+2. **Phase 2 (done)**: erosion and carved mountains, Realm view with
    region names and borders, data map modes with legends, farmland around
    towns, meandering rivers that gather into networks, smaller save files,
    quality setting.
-3. **Phase 3**: editing: terrain and height brushes, province split and merge,
-   realm recolouring, symbol and label placement, custom data layers with
-   auto-fill rules, and your own SVG and PNG assets.
+3. **Phase 3**: editing, in four steps.
+   - **3a (this release)**: edit panel, undo and redo, land and water tools.
+   - 3b: border and naming tools (reassign hexes, split and merge provinces,
+     regions and realms, names, colours, labels).
+   - 3c: custom data layers with auto-fill rules and templates.
+   - 3d: your own SVG and PNG assets.
 4. **Phase 4**: full export set (tiled high-resolution images, province ID
    image, heightmap and masks, CSV) and a desktop build.

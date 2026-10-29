@@ -5,7 +5,7 @@ import { FORMAT_ID, FORMAT_VERSION, type MapData } from './types';
  * base64 so the file stays a single self-describing document.
  */
 
-const TA = { Float32Array, Int32Array, Uint8Array, Uint16Array, Int16Array } as const;
+const TA = { Float32Array, Int32Array, Uint8Array, Uint16Array, Int16Array, Int8Array } as const;
 type TAName = keyof typeof TA;
 
 function b64encode(bytes: Uint8Array): string {

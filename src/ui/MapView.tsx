@@ -3,7 +3,9 @@ import type { LoadedMap } from '../state/useMapWorker';
 import { MapRenderer, ZOOM, hexFactor, type MapMode, type Quality, type View } from '../render/MapRenderer';
 import { drawLabels } from '../render/LabelLayer';
 import { hexAt } from '../model/hex';
-import { ID_RES } from '../render/assets';
+import { ownerAt } from '../render/assets';
+import { drawEditOverlay } from '../edit/overlay';
+import { HEIGHT_TOOLS, type EditSession, type ToolSettings } from '../edit/session';
 
 /** Lettering stays crisp whatever the map's render quality. */
 const labelDpr = () => Math.min(window.devicePixelRatio || 1, 2);
@@ -22,7 +24,19 @@ export interface MapViewHandle {
   setUniform(name: string, value: number): void;
 }
 
+/** What the map view needs from the editor. Read through refs, so it never re-renders the view. */
+export interface EditBridge {
+  settings(): ToolSettings | null;
+  session: EditSession;
+  /** false while a rebuild is running */
+  ready(): boolean;
+  /** stroke finished (the bridge takes it from here) */
+  finish(): void;
+}
+
 interface Props {
+  editor: EditBridge;
+  toolActive: boolean;
   quality: Quality;
   loaded: LoadedMap | null;
   mode: MapMode;
@@ -31,7 +45,7 @@ interface Props {
   onZoom(zoom: number): void;
 }
 
-export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ quality, loaded, mode, selected, onSelect, onZoom }, ref) {
+export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ editor, toolActive, quality, loaded, mode, selected, onSelect, onZoom }, ref) {
   const wrap = useRef<HTMLDivElement>(null);
   const glCanvas = useRef<HTMLCanvasElement>(null);
   const labelCanvas = useRef<HTMLCanvasElement>(null);
@@ -46,6 +60,10 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ quali
   const lastZoomReported = useRef(-1);
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
+  const editorRef = useRef(editor);
+  editorRef.current = editor;
+  /** world position under the mouse, for the brush outline */
+  const pointerWorld = useRef<[number, number] | null>(null);
 
   const draw = useCallback(() => {
     const r = renderer.current;
@@ -64,6 +82,8 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ quali
     r.render({ view: view.current, mode: props.current.mode, selectedProvince: props.current.selected?.province ?? -1, hoveredProvince: hover.current });
     const ctx = labelCanvas.current!.getContext('2d')!;
     drawLabels(ctx, size.current.w, size.current.h, labelDpr(), view.current, l.map, l.assets);
+    const tool = editorRef.current.settings();
+    if (tool) drawEditOverlay(ctx, size.current.w, size.current.h, view.current, l.map, tool, editorRef.current.session, pointerWorld.current);
     if (Math.abs(view.current.zoom - lastZoomReported.current) > 1e-3) {
       lastZoomReported.current = view.current.zoom;
       props.current.onZoom(view.current.zoom);
@@ -167,7 +187,8 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ quali
     if (!loaded || !renderer.current) return;
     renderer.current.setMap(loaded.map, loaded.assets);
     hover.current = -1;
-    view.current = { cx: loaded.map.world.width / 2, cy: loaded.map.world.height / 2, zoom: fitZoom() };
+    // a rebuilt map after an edit keeps the view where it is
+    if (loaded.fresh) view.current = { cx: loaded.map.world.width / 2, cy: loaded.map.world.height / 2, zoom: fitZoom() };
     // fonts arrive asynchronously; redraw lettering once they are ready
     document.fonts?.ready.then(() => schedule());
     draw();
@@ -189,6 +210,22 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ quali
     let downAt: { x: number; y: number } | null = null;
     let moved = 0;
     let pinch: { d: number; zoom: number } | null = null;
+    let editing = false;
+    let panning = false;
+    let space = false;
+    let holdTimer = 0;
+    const tool = () => editorRef.current.settings();
+    const stopStroke = () => {
+      if (!editing) return;
+      editing = false;
+      clearInterval(holdTimer);
+      editorRef.current.finish();
+      schedule();
+    };
+    const heightTool = () => {
+      const t = tool()?.tool;
+      return !!t && HEIGHT_TOOLS.includes(t);
+    };
 
     const worldAt = (x: number, y: number) => {
       const r = el.getBoundingClientRect();
@@ -210,11 +247,8 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ quali
       const { wx, wy } = worldAt(x, y);
       const hex = hexAt(l.map.grid, wx, wy);
       if (hex < 0) return null;
-      const i = Math.floor(wx * ID_RES);
-      const j = Math.floor(wy * ID_RES);
-      let province = -1;
-      if (hexFactor(view.current.zoom) > 0.5) province = l.map.hex.province[hex]; // borders follow hex edges here
-      else if (i >= 0 && j >= 0 && i < l.assets.idW && j < l.assets.idH) province = l.assets.provinceIds[j * l.assets.idW + i] - 1;
+      // borders follow hex edges at hex zoom; elsewhere they are the drawn, smoothed lines
+      const province = hexFactor(view.current.zoom) > 0.5 ? l.map.hex.province[hex] : ownerAt(l.map, l.assets, wx, wy);
       return { hex, province };
     };
 
@@ -229,13 +263,47 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ quali
       if (pointers.size === 1) {
         downAt = { x: e.clientX, y: e.clientY };
         moved = 0;
+        const l = props.current.loaded;
+        const t = tool();
+        // with a tool: left button draws; right or middle button, or Space held, pans
+        if (t && l && e.button === 0 && !space && editorRef.current.ready()) {
+          const { wx, wy } = worldAt(e.clientX, e.clientY);
+          editorRef.current.session.begin(l.map, t, wx, wy);
+          editing = true;
+          if (heightTool()) {
+            renderer.current?.heightChanged();
+            holdTimer = window.setInterval(() => {
+              if (editorRef.current.session.hold()) {
+                renderer.current?.heightChanged();
+                schedule();
+              }
+            }, 60);
+          }
+          schedule();
+        } else {
+          panning = true;
+        }
       } else if (pointers.size === 2) {
+        stopStroke();
+        panning = true;
         const [a, b] = [...pointers.values()];
         pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), zoom: view.current.zoom };
       }
     };
     const onMove = (e: PointerEvent) => {
       const prev = pointers.get(e.pointerId);
+      if (tool()) {
+        const { wx, wy } = worldAt(e.clientX, e.clientY);
+        pointerWorld.current = [wx, wy];
+        if (!prev) schedule();
+      }
+      if (editing && prev) {
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        const { wx, wy } = worldAt(e.clientX, e.clientY);
+        if (editorRef.current.session.move(wx, wy)) renderer.current?.heightChanged();
+        schedule();
+        return;
+      }
       if (!prev) {
         // hover
         const p = pickAt(e.clientX, e.clientY);
@@ -254,6 +322,7 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ quali
         moved += 10;
         return;
       }
+      if (!panning) return;
       const dx = e.clientX - prev.x;
       const dy = e.clientY - prev.y;
       moved += Math.abs(dx) + Math.abs(dy);
@@ -267,17 +336,38 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ quali
       pointers.delete(e.pointerId);
       if (pointers.size < 2) pinch = null;
       el.style.cursor = '';
-      if (pointers.size === 0 && downAt && moved < 5) onSelectRef.current(pickAt(e.clientX, e.clientY));
-      if (pointers.size === 0) downAt = null;
+      if (editing) {
+        stopStroke();
+        downAt = null;
+        return;
+      }
+      if (pointers.size === 0 && downAt && moved < 5 && !tool()) onSelectRef.current(pickAt(e.clientX, e.clientY));
+      if (pointers.size === 0) {
+        downAt = null;
+        panning = false;
+      }
     };
     const onLeave = () => {
+      if (pointerWorld.current) {
+        pointerWorld.current = null;
+        schedule();
+      }
       if (hover.current !== -1) {
         hover.current = -1;
         schedule();
       }
     };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === ' ') space = false;
+    };
+    const onContext = (e: MouseEvent) => e.preventDefault();
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.closest('input, select, textarea')) return;
+      if (e.key === ' ') {
+        space = true;
+        if (tool()) e.preventDefault();
+        return;
+      }
       const v = view.current;
       const step = 120 / v.zoom;
       const r = el.getBoundingClientRect();
@@ -300,7 +390,12 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ quali
     el.addEventListener('pointercancel', onUp);
     el.addEventListener('pointerleave', onLeave);
     window.addEventListener('keydown', onKey);
+    window.addEventListener('keyup', onKeyUp);
+    el.addEventListener('contextmenu', onContext);
     return () => {
+      clearInterval(holdTimer);
+      window.removeEventListener('keyup', onKeyUp);
+      el.removeEventListener('contextmenu', onContext);
       el.removeEventListener('wheel', onWheel);
       el.removeEventListener('pointerdown', onDown);
       el.removeEventListener('pointermove', onMove);
@@ -312,7 +407,7 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ quali
   }, [schedule]);
 
   return (
-    <div ref={wrap} className="mapview" aria-label="Map. Drag to pan, scroll to zoom, click a province to inspect it." role="application">
+    <div ref={wrap} className={`mapview ${toolActive ? 'mapview--tool' : ''}`} aria-label="Map. Drag to pan, scroll to zoom, click a province to inspect it." role="application">
       <canvas ref={glCanvas} className="mapview__gl" />
       <canvas ref={labelCanvas} className="mapview__labels" />
     </div>
