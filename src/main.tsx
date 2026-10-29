@@ -7,6 +7,9 @@ import '@fontsource/alegreya-sans/500.css';
 import '@fontsource/alegreya-sans/700.css';
 import './styles.css';
 import { App } from './App';
+import { registerServiceWorker } from './platform';
+
+registerServiceWorker();
 
 createRoot(document.getElementById('root')!).render(
   <App />,

@@ -38,6 +38,28 @@ function sourceOf(a: SymbolAsset): HTMLImageElement | null {
   return null;
 }
 
+/** Resolves once every picture the map uses has loaded (or failed), for exports. */
+export function preloadSymbols(map: MapData): Promise<void> {
+  const ids = new Set<string>((map.symbols?.placements ?? []).map((p) => p.asset));
+  const st = map.symbols?.settlements;
+  if (st) for (const v of [...Object.values(st.size), ...Object.values(st.realm), ...Object.values(st.culture)]) if (v) ids.add(v);
+  const waits: Promise<void>[] = [];
+  for (const id of ids) {
+    const a = assetById(map, id);
+    if (!a) continue;
+    if (sourceOf(a)) continue;
+    const key = a.id + ':' + a.data.length;
+    waits.push(
+      new Promise((res) => {
+        const t0 = performance.now();
+        const tick = () => (images.get(key) !== 'loading' || performance.now() - t0 > 5000 ? res() : setTimeout(tick, 30));
+        tick();
+      }),
+    );
+  }
+  return Promise.all(waits).then(() => {});
+}
+
 /**
  * A ready-to-draw picture for an asset at roughly `px` pixels wide, tinted or
  * redrawn in ink if asked. Returns null while it is still loading.

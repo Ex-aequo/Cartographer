@@ -232,8 +232,23 @@ export class MapRenderer {
   render(s: RenderState): void {
     const pr = this.renderer.getPixelRatio();
     const size = this.renderer.getDrawingBufferSize(new THREE.Vector2());
+    this.draw(s, size.x, size.y, pr);
+  }
+
+  /**
+   * Renders into a drawing buffer of exactly w × h pixels with `pr` device
+   * pixels per CSS pixel (the look follows view.zoom, the sharpness follows pr).
+   * Used for tiled high-resolution export.
+   */
+  renderExact(s: RenderState, w: number, h: number, pr: number): void {
+    this.renderer.setPixelRatio(1);
+    this.renderer.setSize(w, h, false);
+    this.draw(s, w, h, pr);
+  }
+
+  private draw(s: RenderState, bw: number, bh: number, pr: number): void {
     const u = this.mapMat.uniforms;
-    u.uViewport.value.copy(size);
+    u.uViewport.value.set(bw, bh);
     u.uCenter.value.set(s.view.cx, s.view.cy);
     u.uZoom.value = s.view.zoom * pr;
     u.uPixelRatio.value = pr;
@@ -316,12 +331,15 @@ export class MapRenderer {
     this.textures = [];
   }
 
-  dispose(): void {
+  /** `loseContext` frees the WebGL context at once (offscreen export renderers). */
+  dispose(loseContext = false): void {
     this.disposeTextures();
+    this.layerTex?.dispose();
     this.riverMesh?.geometry.dispose();
     this.mapMat.dispose();
     this.riverMat.dispose();
     this.renderer.dispose();
+    if (loseContext) this.renderer.forceContextLoss();
   }
 }
 

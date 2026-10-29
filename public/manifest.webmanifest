@@ -1,0 +1,19 @@
+{
+  "name": "Cartographer",
+  "short_name": "Cartographer",
+  "description": "Fantasy and game maps: generate, edit, add data and symbols, export for games.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#1d1610",
+  "theme_color": "#2b2018",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ],
+  "file_handlers": [
+    { "action": "./", "accept": { "application/x-cartomap": [".cartomap"] } }
+  ]
+}

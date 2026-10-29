@@ -1,6 +1,7 @@
 # Cartographer
 
-A standalone, browser-based fantasy map generator by Ex-Aequo Games. It draws
+A standalone fantasy map generator by Ex-Aequo Games, for the browser and the
+desktop (Windows, macOS, Linux). It draws
 whole worlds, with continents, climate, rivers, provinces, regions and realms,
 and renders them in a Paradox-style look: a CK3 paper map for the overview that
 turns into lit terrain as you zoom in, down to individual hexes.
@@ -18,6 +19,21 @@ npm run build      # type-check and production build into dist/
 ```
 
 Requires Node 20 or newer and a browser with WebGL 2.
+
+### Install it like an app
+
+- **From the browser**: open the built site (`npm run build`, then serve
+  `dist/` anywhere, or `npx vite preview`) in Chrome or Edge and choose
+  *Install Cartographer* in the address bar. It then opens in its own window
+  and works offline.
+- **Desktop app** (Tauri): `npm run desktop` runs it in a native window;
+  `npm run desktop:build` builds the installer for the computer you are on
+  (needs Rust, and on Linux the WebKitGTK libraries listed in
+  [Tauri's prerequisites](https://v2.tauri.app/start/prerequisites/)). Saving
+  and exporting use the system's Save dialog. The *Desktop apps* workflow on
+  GitHub builds Windows (.msi, .exe), macOS (.dmg) and Linux (.deb, .AppImage)
+  installers: run it from the Actions tab, or push a tag such as `v0.4.0` to
+  attach them to a draft release.
 
 ## Using it
 
@@ -94,6 +110,25 @@ Requires Node 20 or newer and a browser with WebGL 2.
   (see [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md)).
 - **Export → Data layers**: one CSV per custom layer, zipped.
 - **Export → Image of this view**: PNG of the current view, labels included.
+- **Export → High-resolution image…**: the whole world as one PNG up to 16,384
+  pixels wide, in the style of the World, Realm or Province view (paper map
+  with realm names, terrain with region names, or provinces with towns), in
+  the current map mode, with symbols. It is painted in tiles and lettered in
+  one pass, so nothing is cut at the seams.
+- **Export → Export set…**: any mix of
+  - the high-resolution image;
+  - a **province map** (`provinces.png` + `definition.csv`): one unique colour
+    per province and per sea zone, as Paradox games use, with borders along
+    hex edges or as drawn;
+  - **heightmaps**: 16-bit and 8-bit greyscale;
+  - **terrain** index colours, one black-and-white mask per terrain, a water
+    mask and a river mask;
+  - **tables**: CSV for hexes, provinces, regions, realms, sea zones, pinned
+    symbols and every data layer;
+  - the **game data** JSON.
+
+  One part downloads as a single file; several come as a zip with a README
+  explaining the conventions (see [docs/DATA_FORMAT.md](docs/DATA_FORMAT.md)).
 
 Keyboard: arrow keys pan, + and − zoom, Escape puts the tool down or clears the
 selection, Ctrl+Z undo, Ctrl+Shift+Z (or Ctrl+Y) redo, [ and ] brush size.
@@ -107,7 +142,9 @@ While a tool is active, right-drag or hold Space to move the map.
 | Data model | `src/model/` | Pointy-top odd-r hex grid, typed-array layers, versioned project format, game export. |
 | Renderer | `src/render/` | Three.js with one full-screen GLSL shader: paper and terrain looks, biome colour, slope-following gully relief, tree canopy, farmland, water, analytic smooth borders, data map modes, meandering river ribbons, canvas lettering with collision checks. |
 | Editing | `src/edit/`, `src/gen/rederive.ts` | Brushes work on the heightfield and edit layers in place (live redraw while dragging); each stroke is one undo step stored as a diff. A deterministic rebuild in the worker re-derives everything from heightfield + edits and repairs the political map without renumbering ids. |
+| Exports | `src/export/`, `src/worker/exportWorker.ts` | Tiled high-resolution rendering with a second offscreen renderer; province ID image with generated sea zones, heightmaps, masks and tables built in a worker; an exact PNG encoder (8/16-bit) and a zip writer with no dependencies. |
 | UI | `src/ui/` | React. |
+| Desktop | `src-tauri/`, `src/platform.ts`, `public/sw.js` | Tauri 2 shell with native Save dialogs; the web build is an installable offline app. |
 
 Borders are computed in the shader from a Gaussian vote of nearby hexes, the
 same rule the CPU uses for picking, so lines stay smooth at every zoom and
@@ -127,7 +164,8 @@ clicks always land on the province you see.
      merge provinces, regions and realms, names, titles, colours, labels).
    - **3c (done)**: custom data layers with auto-fill rules,
      painting, province roll-ups, templates and CSV export.
-   - **3d (this release)**: symbols: the built-in ink set and your own SVG and
+   - **3d (done)**: symbols: the built-in ink set and your own SVG and
      PNG pictures, placing, pinning, town marks, symbol sets.
-4. **Phase 4**: full export set (tiled high-resolution images, province ID
-   image, heightmap and masks, CSV) and a desktop build.
+4. **Phase 4 (this release)**: full export set (tiled high-resolution
+   images, province ID image with sea zones, heightmaps and masks, CSV) and
+   the desktop app.

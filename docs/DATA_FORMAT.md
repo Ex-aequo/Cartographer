@@ -42,6 +42,7 @@ Two files come out of Cartographer:
   "cultures": [ ... ],
   "rivers":   [ ... ],
   "hexes":    [ ... ],
+  "seaZones": [ ... ]     // the water, split into navigable zones
   "symbols":  [ ... ]     // symbols pinned to hexes
   "layers":   [ ... ]     // definitions of your custom data layers
 }
@@ -67,6 +68,7 @@ Two files come out of Cartographer:
 | `riverFlow` | number | Accumulated flow where `river` is true. |
 | `flowsTo` | int | Downstream hex id, −1 for water. Every land hex drains to the sea. |
 | `province` | int | Province id, −1 for water. |
+| `seaZone` | int | Sea zone or lake id (from 100000) for water hexes, −1 on land. |
 | `edited` | bool | Changed by hand in the editor (height, terrain or river). |
 | `paintedTerrain` | bool | `terrain` was set by hand and overrides the climate. |
 | `data` | object | Values of every per-hex custom layer, keyed by layer id (see *Custom data layers*). |
@@ -182,3 +184,42 @@ example `dungeon`, `lair`) so a game can treat whole groups alike.
 SVG text or PNG data URLs) so it can be loaded into other maps. SVGs are
 cleaned on import and on load: scripts, event handlers, embedded HTML and links
 to other files are removed.
+
+## Sea zones
+
+The water is split into **sea zones** of roughly 100 hexes each (every lake is
+one zone), so ships can move zone by zone the way armies move province by
+province. Zone ids start at **100000** so they never collide with land
+province ids. `seaZones[]` in the game data:
+
+```jsonc
+{ "id": 100004, "name": "Waters of Thiho", "kind": "sea", "hexCount": 112,
+  "coastalProvinces": [3, 17, 18] }
+```
+
+Sea zones are worked out from the map when it is exported (they follow the
+coastline, so editing the land can change them).
+
+## Export set
+
+*Export → Export set…* writes any of these (several come as one zip with a
+`README.txt`). Every image covers the whole world: pixel (x, y) is the world
+point ((x + 0.5) / s, (y + 0.5) / s), where s = image width ÷ world width.
+
+| File | Contents |
+| --- | --- |
+| `map.png` | The rendered map, up to 16,384 px wide, in World, Realm or Province style. |
+| `provinces.png` | 8-bit RGB. Each land province and each sea zone has a unique colour (never black); borders along hex edges or as drawn. |
+| `definition.csv` | `province;red;green;blue;name;type;x;y` (semicolons, as Paradox games expect). `type` is `land`, `sea` or `lake`; x, y is a pixel inside it. |
+| `heightmap.png` | 16-bit greyscale: 0 = deepest sea, 32768 = sea level, 65535 = highest peak. |
+| `heightmap_8bit.png` | 8-bit: sea 0–95, sea level 96, land 96–255. |
+| `terrain.png` | Terrain type colours, hex-exact. |
+| `masks/<terrain>.png` | White where that terrain is, black elsewhere; exactly one mask is white at each pixel. |
+| `water.png` | White over sea and lakes, following the drawn coastline. |
+| `rivers.png` | River lines through hex centres, wider downstream. |
+| `csv/*.csv` | `hexes`, `provinces`, `regions`, `realms`, `sea_zones`, and `symbols` (pinned) — one row per item, ids as in the game data. Lists inside a cell are space-separated. |
+| `layers/*.csv` | One table per custom data layer (see above). |
+| `gamedata.json` | The game data described in this document. |
+
+Heightmaps and masks share one size (1,024 to 8,192 px wide); the province
+map has its own (2,048 to 8,192 px).

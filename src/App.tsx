@@ -9,6 +9,8 @@ import { SymbolsPanel } from './ui/SymbolsPanel';
 import { useSymbols } from './state/useSymbols';
 import { layerColors, layerCsv } from './model/layers';
 import { zip } from './util/zip';
+import { saveFile } from './platform';
+import { ExportDialog, modeLabelOf, type DialogPart } from './ui/ExportDialog';
 import { useEditor } from './state/useEditor';
 import { Inspector } from './ui/Inspector';
 import { Legend, ModeSwitch, Veil, ZoomLadder } from './ui/Controls';
@@ -45,6 +47,12 @@ export function App() {
   const [pick, setPick] = useState<Pick | null>(null);
   const [zoom, setZoom] = useState(1);
   const [error, setError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState<DialogPart[] | null>(null);
+  useEffect(() => {
+    const on = (e: Event) => setError((e as CustomEvent<string>).detail);
+    window.addEventListener('carto-error', on);
+    return () => window.removeEventListener('carto-error', on);
+  }, []);
   const viewRef = useRef<MapViewHandle>(null);
   const onEditError = useCallback((m: string) => setError(m), []);
   const editor = useEditor(loaded, setLoaded, rederive, onEditError);
@@ -187,6 +195,7 @@ export function App() {
       editor: () => editor,
       setTab: changeTab,
       setActiveLayer,
+      openExport: (parts: DialogPart[]) => setExporting(parts),
     };
   });
 
@@ -198,6 +207,8 @@ export function App() {
           { label: 'Game data', hint: 'Hexes, provinces, realms and layers as JSON', run: onExportData },
           { label: 'Data layers', hint: 'One CSV table per layer, zipped', run: onExportCsv, disabled: !layers.length },
           { label: 'Image of this view', hint: 'PNG at screen resolution', run: onExportImage },
+          { label: 'High-resolution image…', hint: 'The whole world, up to 16,384 px wide', run: () => setExporting(['image']) },
+          { label: 'Export set…', hint: 'Image, province map, heightmaps, masks, tables', run: () => setExporting(['image', 'provinces', 'heightmap', 'terrain', 'tables', 'gamedata']) },
         ]}
       />
       <SidePanel tab={tab} onTab={changeTab}>
@@ -301,6 +312,19 @@ export function App() {
           <Legend mode={mode} present={presentCodes} layer={shownLayer} />
         </>
       )}
+      {loaded && exporting && (
+        <ExportDialog
+          map={loaded.map}
+          assets={loaded.assets}
+          mode={mode}
+          modeLabel={modeLabelOf(mode, layers)}
+          layer={shownLayer && shownColors ? { colors: shownColors, badges: shownLayer.def.showIcons ? shownLayer : null } : null}
+          initial={exporting}
+          fileBase={fileBase()}
+          onClose={() => setExporting(null)}
+          onDownload={download}
+        />
+      )}
       {busy && <Veil step={busy.step} fraction={busy.fraction} />}
       {error && (
         <div className="toast" role="alert">
@@ -324,12 +348,5 @@ function labelName(map: MapData | undefined, key: string | null): string | null 
 }
 
 function download(blob: Blob, name: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  saveFile(blob, name).catch((e) => window.dispatchEvent(new CustomEvent('carto-error', { detail: `The file could not be saved: ${(e as Error).message}` })));
 }
