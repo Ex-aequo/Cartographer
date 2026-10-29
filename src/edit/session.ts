@@ -1,9 +1,25 @@
-import type { MapData } from '../model/types';
+import type { LabelEdit, MapData } from '../model/types';
 import { HexFlag, Terrain, Touched } from '../model/types';
 import { hexAt, hexCenterX, hexCenterY, sampleField } from '../model/hex';
 import { ensureEdits } from '../gen/rederive';
+import { growInto, mergeProvinces, splitProvince } from './political';
 
-export type ToolId = 'raise' | 'lower' | 'smooth' | 'flatten' | 'paint' | 'river' | 'erase-river' | 'lake' | 'drain';
+export type ToolId =
+  | 'raise'
+  | 'lower'
+  | 'smooth'
+  | 'flatten'
+  | 'paint'
+  | 'river'
+  | 'erase-river'
+  | 'lake'
+  | 'drain'
+  | 'assign'
+  | 'split'
+  | 'merge'
+  | 'region'
+  | 'realm'
+  | 'label';
 
 export interface ToolSettings {
   tool: ToolId | null;
@@ -24,7 +40,18 @@ export const TOOL_LABELS: Record<ToolId, string> = {
   'erase-river': 'Erase river',
   lake: 'Fill lake',
   drain: 'Drain',
+  assign: 'Reassign hexes',
+  split: 'Split province',
+  merge: 'Merge provinces',
+  region: 'Change region',
+  realm: 'Change realm',
+  label: 'Move labels',
 };
+
+/** Tools that draw a line (collected as points, applied when the stroke ends). */
+export const LINE_TOOLS: ToolId[] = ['river', 'split', 'merge'];
+/** Tools that only change the political map. */
+export const POLITICAL_TOOLS: ToolId[] = ['assign', 'split', 'merge', 'region', 'realm'];
 
 /** Tools that change the heightfield (and so redraw live while dragging). */
 export const HEIGHT_TOOLS: ToolId[] = ['raise', 'lower', 'smooth', 'flatten', 'lake', 'drain'];
@@ -53,10 +80,13 @@ export interface PoliticalCore {
   provinces: { name: string; region: number; capitalHex: number }[];
   regions: { name: string; realm: number; capitalProvince: number }[];
   realms: { name: string; title: string; color: [number, number, number]; culture: number; capitalProvince: number }[];
+  labels: Record<string, LabelEdit>;
 }
 
 export interface StepRecord {
   label: string;
+  /** 'labels': only label placement changed, nothing to rebuild */
+  kind?: 'labels';
   height?: { x: number; y: number; w: number; h: number; before: Float32Array; after: Float32Array };
   terrain?: Diff;
   riverBlock?: Diff;
@@ -87,9 +117,18 @@ interface Stroke {
   points: [number, number][];
   /** paint / erase: hexes touched in this stroke, for the live preview */
   hexes: Set<number>;
+  /** province, region or realm being extended (border tools) */
+  target: number;
+  labelKey?: string;
 }
 
 const MAX_UNDO = 100;
+
+export interface ChangeToken {
+  provinceBefore: Int32Array;
+  coreBefore: PoliticalCore;
+  paths: number[][];
+}
 
 /**
  * Editing on the main thread: brushes change the heightfield and edit layers
@@ -100,6 +139,8 @@ export class EditSession {
   undoStack: StepRecord[] = [];
   redoStack: StepRecord[] = [];
   stroke: Stroke | null = null;
+  /** why the last stroke did nothing, for the user */
+  message: string | null = null;
 
   get canUndo() {
     return this.undoStack.length > 0;
@@ -113,9 +154,22 @@ export class EditSession {
     this.stroke = null;
   }
 
-  begin(map: MapData, settings: ToolSettings, x: number, y: number): void {
+  begin(map: MapData, settings: ToolSettings, x: number, y: number, ctx: { labelKey?: string } = {}): void {
     if (!settings.tool) return;
+    this.message = null;
     const e = ensureEdits(map);
+    // border tools extend whatever the stroke starts in
+    const h0 = hexAt(map.grid, x, y);
+    const p0 = h0 >= 0 ? map.hex.province[h0] : -1;
+    let target = -1;
+    if (settings.tool === 'assign') target = p0;
+    else if (settings.tool === 'region') target = p0 >= 0 ? map.provinces[p0].region : -1;
+    else if (settings.tool === 'realm') target = p0 >= 0 ? map.regions[map.provinces[p0].region].realm : -1;
+    if (['assign', 'region', 'realm'].includes(settings.tool) && target < 0) {
+      this.message = 'Start the stroke on land, inside the province, region or realm you want to extend.';
+      return;
+    }
+    if (settings.tool === 'label' && !ctx.labelKey) return;
     const isHeight = HEIGHT_TOOLS.includes(settings.tool) || settings.tool === 'river';
     this.stroke = {
       map,
@@ -132,6 +186,8 @@ export class EditSession {
       flattenTarget: sampleField(map.height, x, y),
       points: [[x, y]],
       hexes: new Set(),
+      target,
+      labelKey: ctx.labelKey,
     };
     this.dab(x, y);
   }
@@ -140,9 +196,18 @@ export class EditSession {
   move(x: number, y: number): boolean {
     const s = this.stroke;
     if (!s) return false;
-    if (s.settings.tool === 'river') {
+    if (LINE_TOOLS.includes(s.settings.tool!)) {
       const [lx, ly] = s.points[s.points.length - 1];
       if (Math.hypot(x - lx, y - ly) > 0.3) s.points.push([x, y]);
+      return false;
+    }
+    if (s.settings.tool === 'label') {
+      const [lx, ly] = s.last;
+      const labels = (s.map.labels ??= {});
+      const e = (labels[s.labelKey!] ??= {});
+      e.dx = (e.dx ?? 0) + x - lx;
+      e.dy = (e.dy ?? 0) + y - ly;
+      s.last = [x, y];
       return false;
     }
     const [lx, ly] = s.last;
@@ -170,9 +235,22 @@ export class EditSession {
     if (!s) return null;
     const map = s.map;
     const e = ensureEdits(map);
-    if (s.settings.tool === 'river') this.applyRiver(s);
+    const tool = s.settings.tool!;
+    if (tool === 'river') this.applyRiver(s);
+    if (tool === 'split') {
+      const r = splitProvince(map, pathFromPoints(map, s.points));
+      if (!r.ok) this.message = r.message;
+    }
+    if (tool === 'merge') {
+      const a = hexAt(map.grid, s.points[0][0], s.points[0][1]);
+      const [bx, by] = s.points[s.points.length - 1];
+      const b = hexAt(map.grid, bx, by);
+      const r = mergeProvinces(map, a >= 0 ? map.hex.province[a] : -1, b >= 0 ? map.hex.province[b] : -1);
+      if (!r.ok) this.message = r.message;
+    }
     const rec: StepRecord = {
-      label: TOOL_LABELS[s.settings.tool!],
+      label: TOOL_LABELS[tool],
+      kind: tool === 'label' ? 'labels' : undefined,
       riverPathsBefore: s.riverPathsBefore,
       riverPathsAfter: e.riverPaths.map((p) => p.slice()),
       coreBefore: s.coreBefore,
@@ -194,11 +272,32 @@ export class EditSession {
     rec.terrain = diff(s.terrainBefore, e.terrain);
     rec.riverBlock = diff(s.riverBlockBefore, e.riverBlock);
     rec.touched = diff(s.touchedBefore, e.touched);
-    const same = !rec.height && !rec.terrain && !rec.riverBlock && JSON.stringify(rec.riverPathsBefore) === JSON.stringify(rec.riverPathsAfter);
-    return same ? null : rec;
+    return isEmpty(rec, map) ? null : rec;
   }
 
-  /** The rebuilt map arrived: complete the step and put it on the undo stack. */
+  /**
+   * One undoable change made outside a brush stroke (renaming, recolouring,
+   * a new region, a label setting). `mutate` changes the map in place.
+   */
+  change(map: MapData, label: string, mutate: () => void, kind?: 'labels'): StepRecord | null {
+    if (this.stroke) return null;
+    const t = this.startChange(map);
+    mutate();
+    return this.finishChange(map, t, label, kind);
+  }
+
+  /** Two-part change, for controls that adjust live (sliders) and record once at the end. */
+  startChange(map: MapData): ChangeToken {
+    const e = ensureEdits(map);
+    return { provinceBefore: map.hex.province.slice(), coreBefore: captureCore(map), paths: e.riverPaths.map((p) => p.slice()) };
+  }
+
+  finishChange(map: MapData, t: ChangeToken, label: string, kind?: 'labels'): StepRecord | null {
+    const rec: StepRecord = { label, kind, riverPathsBefore: t.paths, riverPathsAfter: t.paths, coreBefore: t.coreBefore, provinceBefore: t.provinceBefore };
+    return isEmpty(rec, map) ? null : rec;
+  }
+
+  /** The rebuilt map arrived (or, for label steps, the map itself): complete the step and put it on the undo stack. */
   commit(rec: StepRecord, rebuilt: MapData): void {
     if (rec.provinceBefore) rec.province = diff(rec.provinceBefore, rebuilt.hex.province) ?? undefined;
     delete rec.provinceBefore;
@@ -232,7 +331,32 @@ export class EditSession {
     const { tool, radius, strength } = s.settings;
     const map = s.map;
     const e = ensureEdits(map);
-    if (tool === 'river') return false;
+    if (tool === 'river' || tool === 'split' || tool === 'merge' || tool === 'label') return false;
+    if (tool === 'assign' || tool === 'region' || tool === 'realm') {
+      const hexes: number[] = [];
+      forHexesInRadius(map, x, y, radius, (h) => hexes.push(h));
+      if (tool === 'assign') {
+        for (const h of growInto(map, s.target, hexes)) s.hexes.add(h);
+        return false;
+      }
+      for (const h of hexes) {
+        const p = map.hex.province[h];
+        if (p < 0) continue;
+        const pr = map.provinces[p];
+        if (tool === 'region' && pr.region !== s.target) {
+          pr.region = s.target;
+          for (const q of pr.hexes) s.hexes.add(q);
+        }
+        if (tool === 'realm') {
+          const rg = map.regions[pr.region];
+          if (rg.realm !== s.target) {
+            rg.realm = s.target;
+            for (const pk of rg.provinces) for (const q of map.provinces[pk].hexes) s.hexes.add(q);
+          }
+        }
+      }
+      return false;
+    }
     if (tool === 'paint' || tool === 'erase-river') {
       forHexesInRadius(map, x, y, radius, (h) => {
         if (tool === 'paint') {
@@ -386,7 +510,15 @@ export function captureCore(map: MapData): PoliticalCore {
     provinces: map.provinces.map((p) => ({ name: p.name, region: p.region, capitalHex: p.capitalHex })),
     regions: map.regions.map((r) => ({ name: r.name, realm: r.realm, capitalProvince: r.capitalProvince })),
     realms: map.realms.map((r) => ({ name: r.name, title: r.title, color: [...r.color] as [number, number, number], culture: r.culture, capitalProvince: r.capitalProvince })),
+    labels: JSON.parse(JSON.stringify(map.labels ?? {})),
   };
+}
+
+function isEmpty(rec: StepRecord, map: MapData): boolean {
+  if (rec.height || rec.terrain || rec.riverBlock) return false;
+  if (JSON.stringify(rec.riverPathsBefore) !== JSON.stringify(rec.riverPathsAfter)) return false;
+  if (rec.provinceBefore && diff(rec.provinceBefore, map.hex.province)) return false;
+  return JSON.stringify(rec.coreBefore) === JSON.stringify(captureCore(map));
 }
 
 function applyCore(map: MapData, core: PoliticalCore): void {
@@ -397,6 +529,7 @@ function applyCore(map: MapData, core: PoliticalCore): void {
   }));
   map.regions = core.regions.map((c, id) => ({ ...(map.regions[id] ?? { provinces: [] }), ...c, id }));
   map.realms = core.realms.map((c, id) => ({ ...(map.realms[id] ?? { regions: [] }), ...c, id }));
+  map.labels = JSON.parse(JSON.stringify(core.labels ?? {}));
 }
 
 function applyStep(map: MapData, rec: StepRecord, side: 'before' | 'after'): void {

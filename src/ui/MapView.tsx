@@ -1,7 +1,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef } from 'react';
 import type { LoadedMap } from '../state/useMapWorker';
 import { MapRenderer, ZOOM, hexFactor, type MapMode, type Quality, type View } from '../render/MapRenderer';
-import { drawLabels } from '../render/LabelLayer';
+import { drawLabels, labelAt, type DrawnLabel } from '../render/LabelLayer';
 import { hexAt } from '../model/hex';
 import { ownerAt } from '../render/assets';
 import { drawEditOverlay } from '../edit/overlay';
@@ -32,11 +32,15 @@ export interface EditBridge {
   ready(): boolean;
   /** stroke finished (the bridge takes it from here) */
   finish(): void;
+  selectedLabel(): string | null;
+  selectLabel(key: string | null): void;
 }
 
 interface Props {
   editor: EditBridge;
   toolActive: boolean;
+  /** changes when the map changed in place (labels moved, undo of a label step) */
+  revision: number;
   quality: Quality;
   loaded: LoadedMap | null;
   mode: MapMode;
@@ -45,7 +49,7 @@ interface Props {
   onZoom(zoom: number): void;
 }
 
-export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ editor, toolActive, quality, loaded, mode, selected, onSelect, onZoom }, ref) {
+export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ editor, toolActive, revision, quality, loaded, mode, selected, onSelect, onZoom }, ref) {
   const wrap = useRef<HTMLDivElement>(null);
   const glCanvas = useRef<HTMLCanvasElement>(null);
   const labelCanvas = useRef<HTMLCanvasElement>(null);
@@ -64,6 +68,8 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ edito
   editorRef.current = editor;
   /** world position under the mouse, for the brush outline */
   const pointerWorld = useRef<[number, number] | null>(null);
+  /** labels drawn in the last frame, for the label tool */
+  const drawnLabels = useRef<DrawnLabel[]>([]);
 
   const draw = useCallback(() => {
     const r = renderer.current;
@@ -81,7 +87,7 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ edito
     }
     r.render({ view: view.current, mode: props.current.mode, selectedProvince: props.current.selected?.province ?? -1, hoveredProvince: hover.current });
     const ctx = labelCanvas.current!.getContext('2d')!;
-    drawLabels(ctx, size.current.w, size.current.h, labelDpr(), view.current, l.map, l.assets);
+    drawnLabels.current = drawLabels(ctx, size.current.w, size.current.h, labelDpr(), view.current, l.map, l.assets, editorRef.current.settings()?.tool === 'label' ? editorRef.current.selectedLabel() : null);
     const tool = editorRef.current.settings();
     if (tool) drawEditOverlay(ctx, size.current.w, size.current.h, view.current, l.map, tool, editorRef.current.session, pointerWorld.current);
     if (Math.abs(view.current.zoom - lastZoomReported.current) > 1e-3) {
@@ -194,7 +200,7 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ edito
     draw();
   }, [loaded, draw, schedule]);
 
-  useEffect(() => schedule(), [mode, selected, schedule]);
+  useEffect(() => schedule(), [mode, selected, revision, toolActive, schedule]);
 
   useEffect(() => {
     const r = renderer.current;
@@ -266,10 +272,22 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView({ edito
         const l = props.current.loaded;
         const t = tool();
         // with a tool: left button draws; right or middle button, or Space held, pans
-        if (t && l && e.button === 0 && !space && editorRef.current.ready()) {
+        let labelKey: string | null = null;
+        if (t?.tool === 'label' && e.button === 0 && !space) {
+          const r = el.getBoundingClientRect();
+          labelKey = labelAt(drawnLabels.current, e.clientX - r.left, e.clientY - r.top);
+          editorRef.current.selectLabel(labelKey);
+          schedule();
+        }
+        if (t && l && e.button === 0 && !space && editorRef.current.ready() && (t.tool !== 'label' || labelKey)) {
           const { wx, wy } = worldAt(e.clientX, e.clientY);
-          editorRef.current.session.begin(l.map, t, wx, wy);
-          editing = true;
+          editorRef.current.session.begin(l.map, t, wx, wy, { labelKey: labelKey ?? undefined });
+          editing = !!editorRef.current.session.stroke;
+          if (!editing) {
+            editorRef.current.finish(); // reports why nothing happened
+            panning = true;
+            return;
+          }
           if (heightTool()) {
             renderer.current?.heightChanged();
             holdTimer = window.setInterval(() => {

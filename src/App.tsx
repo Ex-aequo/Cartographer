@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { DEFAULT_PARAMS, type GenParams } from './model/types';
+import { DEFAULT_PARAMS, type GenParams, type MapData } from './model/types';
 import { useMapWorker, type LoadedMap } from './state/useMapWorker';
 import { MapView, type MapViewHandle, type Pick } from './ui/MapView';
 import { SidePanel, WorldPanel, type PanelTab } from './ui/WorldPanel';
@@ -145,7 +145,7 @@ export function App() {
 
   return (
     <div className="app">
-      <MapView ref={viewRef} editor={editor.bridge} toolActive={!!editor.settings.tool} quality={quality} loaded={loaded} mode={mode} selected={pick} onSelect={setPick} onZoom={setZoom} />
+      <MapView ref={viewRef} editor={editor.bridge} toolActive={!!editor.settings.tool} revision={editor.revision} quality={quality} loaded={loaded} mode={mode} selected={pick} onSelect={setPick} onZoom={setZoom} />
       <TopBar quality={quality} onQuality={changeQuality} name={loaded?.map.meta.params.seed ?? ''} hasMap={!!loaded} onOpen={onOpen} onSave={onSave} onExportData={onExportData} onExportImage={onExportImage} />
       <SidePanel tab={tab} onTab={changeTab}>
         {tab === 'world' ? (
@@ -162,6 +162,21 @@ export function App() {
             onUndo={undo}
             onRedo={redo}
             editedHexes={editor.editedHexes}
+            selectedLabel={editor.selectedLabel}
+            selectedLabelName={labelName(loaded?.map, editor.selectedLabel)}
+            labelEdit={editor.selectedLabel ? loaded?.map.labels?.[editor.selectedLabel] : undefined}
+            hiddenLabels={Object.values(loaded?.map.labels ?? {}).filter((e) => e.hidden).length}
+            onAdjustLabel={editor.adjustLabel}
+            onAdjustLabelEnd={editor.endAdjustLabel}
+            onShowAllLabels={() =>
+              editor.change(
+                'Show hidden names',
+                (m) => {
+                  for (const e of Object.values(m.labels ?? {})) delete e.hidden;
+                },
+                'labels',
+              )
+            }
           />
         )}
       </SidePanel>
@@ -170,6 +185,7 @@ export function App() {
           map={loaded.map}
           pick={pick}
           onClose={() => setPick(null)}
+          onChange={tab === 'edit' ? editor.change : undefined}
           onSelectProvince={(id) => {
             const p = loaded.map.provinces[id];
             setPick({ province: id, hex: p.capitalHex });
@@ -202,6 +218,15 @@ export function App() {
       )}
     </div>
   );
+}
+
+function labelName(map: MapData | undefined, key: string | null): string | null {
+  if (!map || !key) return null;
+  const [kind, id] = key.split(':');
+  const n = Number(id);
+  if (kind === 'realm') return `${map.realms[n]?.title} of ${map.realms[n]?.name}`;
+  if (kind === 'region') return `Region of ${map.regions[n]?.name}`;
+  return map.provinces[n]?.name ?? null;
 }
 
 function download(blob: Blob, name: string) {

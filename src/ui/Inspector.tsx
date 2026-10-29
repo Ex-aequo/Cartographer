@@ -1,4 +1,6 @@
+import { useEffect, useRef, useState } from 'react';
 import type { MapData } from '../model/types';
+import { REALM_TITLES, newRealmFrom, newRegionFrom } from '../edit/political';
 import { BIOME_NAMES, HexFlag, RELIEF_NAMES, TERRAIN_NAMES } from '../model/types';
 import { toAxial } from '../model/hex';
 import { DEPTH_METRES, ELEVATION_METRES } from '../gen/biomes';
@@ -9,9 +11,11 @@ interface Props {
   pick: Pick;
   onClose(): void;
   onSelectProvince(id: number): void;
+  /** set while the Edit tab is open: names, titles and colours become editable */
+  onChange?: (label: string, mutate: (map: MapData) => void) => void;
 }
 
-export function Inspector({ map, pick, onClose, onSelectProvince }: Props) {
+export function Inspector({ map, pick, onClose, onSelectProvince, onChange }: Props) {
   const prov = pick.province >= 0 ? map.provinces[pick.province] : null;
   const region = prov ? map.regions[prov.region] : null;
   const realm = region ? map.realms[region.realm] : null;
@@ -45,6 +49,8 @@ export function Inspector({ map, pick, onClose, onSelectProvince }: Props) {
             </div>
           </div>
         )}
+
+        {onChange && prov && region && realm && <EditNames map={map} provinceId={prov.id} onChange={onChange} />}
 
         {prov && (
           <dl className="facts">
@@ -105,5 +111,94 @@ export function Inspector({ map, pick, onClose, onSelectProvince }: Props) {
         </dl>
       </div>
     </aside>
+  );
+}
+
+const hex2 = (n: number) => n.toString(16).padStart(2, '0');
+const toHex = (c: [number, number, number]) => `#${c.map(hex2).join('')}`;
+const fromHex = (h: string): [number, number, number] => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+
+/** Names, title, colour, and making new regions and realms (Edit tab only). */
+function EditNames({ map, provinceId, onChange }: { map: MapData; provinceId: number; onChange: (label: string, mutate: (m: MapData) => void) => void }) {
+  const prov = map.provinces[provinceId];
+  const region = map.regions[prov.region];
+  const realm = map.realms[region.realm];
+  const titles = REALM_TITLES.includes(realm.title) ? REALM_TITLES : [realm.title, ...REALM_TITLES];
+  return (
+    <div className="names">
+      <NameField label="Province" value={prov.name} onCommit={(v) => onChange('Rename province', (m) => (m.provinces[prov.id].name = v))} />
+      <NameField label="Region" value={region.name} onCommit={(v) => onChange('Rename region', (m) => (m.regions[region.id].name = v))} />
+      <NameField label="Realm" value={realm.name} onCommit={(v) => onChange('Rename realm', (m) => (m.realms[realm.id].name = v))} />
+      <div className="names__row">
+        <label className="field">
+          <span>Title</span>
+          <select value={realm.title} onChange={(e) => onChange('Change title', (m) => (m.realms[realm.id].title = e.target.value))}>
+            {titles.map((t) => (
+              <option key={t}>{t}</option>
+            ))}
+          </select>
+        </label>
+        <ColorField color={realm.color} onCommit={(c) => onChange('Recolour realm', (m) => (m.realms[realm.id].color = c))} />
+      </div>
+      <div className="names__actions">
+        <button type="button" className="btn btn--ghost" disabled={region.provinces.length < 2} onClick={() => onChange(`New region from ${prov.name}`, (m) => newRegionFrom(m, prov.id))}>
+          Make {prov.name} a new region
+        </button>
+        <button type="button" className="btn btn--ghost" disabled={realm.regions.length < 2} onClick={() => onChange(`Independence for ${region.name}`, (m) => newRealmFrom(m, region.id))}>
+          Make {region.name} an independent realm
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function NameField({ label, value, onCommit }: { label: string; value: string; onCommit(v: string): void }) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  const commit = () => {
+    const v = draft.trim();
+    if (v && v !== value) onCommit(v);
+    else setDraft(value);
+  };
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <input
+        value={draft}
+        maxLength={40}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+          if (e.key === 'Escape') {
+            setDraft(value);
+            (e.target as HTMLInputElement).blur();
+          }
+        }}
+      />
+    </label>
+  );
+}
+
+/** Commits when the colour picker closes (the native "change" event), not while dragging. */
+function ColorField({ color, onCommit }: { color: [number, number, number]; onCommit(c: [number, number, number]): void }) {
+  const ref = useRef<HTMLInputElement>(null);
+  const cb = useRef(onCommit);
+  cb.current = onCommit;
+  useEffect(() => {
+    const el = ref.current!;
+    el.value = toHex(color);
+    const done = () => {
+      const c = fromHex(el.value);
+      if (toHex(c) !== toHex(color)) cb.current(c);
+    };
+    el.addEventListener('change', done);
+    return () => el.removeEventListener('change', done);
+  }, [color]);
+  return (
+    <label className="field names__color">
+      <span>Colour</span>
+      <input ref={ref} type="color" />
+    </label>
   );
 }

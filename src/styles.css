@@ -301,6 +301,51 @@ h3 {
   cursor: crosshair;
 }
 
+.names {
+  margin: 0 0 12px;
+  padding: 10px 0 2px;
+  border-top: 1px solid rgba(184, 146, 79, 0.2);
+  border-bottom: 1px solid rgba(184, 146, 79, 0.2);
+}
+.names .field {
+  margin-bottom: 8px;
+}
+.names__row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+.names__color input {
+  width: 52px;
+  height: 31px;
+  padding: 2px;
+  border: 1px solid rgba(184, 146, 79, 0.3);
+  border-radius: var(--r);
+  background: rgba(14, 10, 7, 0.45);
+  cursor: pointer;
+}
+.names__actions {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.names__actions .btn {
+  text-align: left;
+  font-size: 13.5px;
+}
+.label-controls {
+  margin-bottom: 8px;
+}
+.label-controls__name {
+  margin: 0 0 8px;
+  font-family: var(--font-serif);
+  font-size: 17px;
+}
+.btn--wide {
+  width: 100%;
+  margin-top: 6px;
+}
+
 /* menu */
 .menu {
   position: relative;
@@ -378,6 +423,9 @@ h3 {
   top: 60px;
   right: 14px;
   width: 300px;
+  /* stays clear of the zoom ladder below it */
+  max-height: calc(100% - 330px);
+  min-height: 220px;
 }
 
 /* form fields */

@@ -43,7 +43,16 @@ Requires Node 20 or newer and a browser with WebGL 2.
     rivers, biomes, terrain, provinces and borders. Land that rises from the
     sea joins the nearest province (or becomes a new one); a province whose land
     is all flooded is retired, and its id is never reused.
-  - Undo and redo cover every stroke, 100 steps deep. Edits are saved in the
+  - *Borders*: Reassign hexes (drag outward from a province to grow it), Split
+    province (draw a line across it), Merge provinces (drag from one into its
+    neighbour), Change region and Change realm (drag from inside one across
+    others to bring them in).
+  - *Words*: Move labels (drag any name; click it to resize, curve, turn or
+    hide it).
+  - With no tool selected, click a province: the inspector lets you rename the
+    province, region and realm, change the realm's title and colour, make a
+    province its own region, or make a region an independent realm.
+  - Undo and redo cover every change, 100 steps deep. Edits are saved in the
     `.cartomap` file and marked in the game-data export.
 - **Inspector**: click any province to see its realm, region, terrain,
   neighbours, and the data of the hex under the cursor.
@@ -79,9 +88,9 @@ clicks always land on the province you see.
    towns, meandering rivers that gather into networks, smaller save files,
    quality setting.
 3. **Phase 3**: editing, in four steps.
-   - **3a (this release)**: edit panel, undo and redo, land and water tools.
-   - 3b: border and naming tools (reassign hexes, split and merge provinces,
-     regions and realms, names, colours, labels).
+   - **3a (done)**: edit panel, undo and redo, land and water tools.
+   - **3b (this release)**: border and naming tools (reassign hexes, split and
+     merge provinces, regions and realms, names, titles, colours, labels).
    - 3c: custom data layers with auto-fill rules and templates.
    - 3d: your own SVG and PNG assets.
 4. **Phase 4**: full export set (tiled high-resolution images, province ID

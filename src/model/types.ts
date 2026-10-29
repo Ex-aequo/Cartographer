@@ -238,6 +238,20 @@ export interface EditLayers {
 
 export const Touched = { Height: 1, Terrain: 2, River: 4 } as const;
 
+/** Hand adjustments to a label. Keys: `realm:<id>`, `region:<id>`, `province:<id>`. */
+export interface LabelEdit {
+  /** offset, world units */
+  dx?: number;
+  dy?: number;
+  /** size multiplier */
+  scale?: number;
+  /** extra curvature, −1..1 (fraction of the label's length) */
+  bend?: number;
+  /** extra rotation, radians */
+  angle?: number;
+  hidden?: boolean;
+}
+
 export interface River {
   id: number;
   name: string;
@@ -286,4 +300,6 @@ export interface MapData {
   layers: unknown[];
   /** Hand edits (format 3). Absent on maps nobody has edited. */
   edits?: EditLayers;
+  /** Hand-placed labels (format 3). */
+  labels?: Record<string, LabelEdit>;
 }
