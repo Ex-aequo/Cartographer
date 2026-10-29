@@ -10,6 +10,7 @@ import { useSymbols } from './state/useSymbols';
 import { layerColors, layerCsv } from './model/layers';
 import { zip } from './util/zip';
 import { saveFile } from './platform';
+import { t, useLang } from './i18n';
 import { ExportDialog, modeLabelOf, type DialogPart } from './ui/ExportDialog';
 import { useEditor } from './state/useEditor';
 import { Inspector } from './ui/Inspector';
@@ -22,6 +23,7 @@ import { gzip, mapToJSON } from './model/serialize';
 import { buildGameExport } from './model/exportGame';
 
 export function App() {
+  useLang();
   const { generate, open, rederive, busy } = useMapWorker();
   const [tab, setTab] = useState<PanelTab>('world');
   const [params, setParams] = useState<GenParams>(DEFAULT_PARAMS);
@@ -131,7 +133,7 @@ export function App() {
         setPick(null);
         setLoaded(l);
       } catch (e) {
-        setError(`The world could not be drawn: ${(e as Error).message}`);
+        setError(t('The world could not be drawn: {msg}', { msg: (e as Error).message }));
       }
     },
     [generate],
@@ -152,7 +154,7 @@ export function App() {
       setParams(l.map.meta.params);
       setLoaded(l);
     } catch (e) {
-      setError(`That file could not be opened. ${(e as Error).message}`);
+      setError(t('That file could not be opened. {msg}', { msg: (e as Error).message }));
     }
   };
 
@@ -174,7 +176,7 @@ export function App() {
   };
   const onExportCsv = () => {
     if (!loaded || !loaded.map.layers.length) {
-      setError('This map has no data layers yet. Add one in the Data tab.');
+      setError(t('This map has no data layers yet. Add one in the Data tab.'));
       return;
     }
     const files = loaded.map.layers.map((l) => ({ name: `${l.def.id}.csv`, data: layerCsv(loaded.map, l) }));
@@ -204,12 +206,12 @@ export function App() {
       <MapView ref={viewRef} editor={editor.bridge} toolActive={!!editor.settings.tool || (tab === 'symbols' && !!sym.armed)} revision={editor.revision} quality={quality} loaded={loaded} mode={mode} layerColors={shownColors} badgeLayer={shownLayer?.def.showIcons ? shownLayer : null} symbols={sym.bridge} selected={pick} onSelect={setPick} onZoom={setZoom} />
       <TopBar quality={quality} onQuality={changeQuality} name={loaded?.map.meta.params.seed ?? ''} hasMap={!!loaded} onOpen={onOpen} onSave={onSave}
         exports={[
-          { label: 'Game data', hint: 'Hexes, provinces, realms and layers as JSON', run: onExportData },
-          { label: 'Data layers', hint: 'One CSV table per layer, zipped', run: onExportCsv, disabled: !layers.length },
-          { label: 'Image of this view', hint: 'PNG at screen resolution', run: onExportImage },
-          { label: 'High-resolution image…', hint: 'The whole world, up to 16,384 px wide', run: () => setExporting(['image']) },
-          { label: 'All map modes…', hint: 'One image per map mode and data layer, zipped', run: () => setExporting(['modes']) },
-          { label: 'Export set…', hint: 'Image, province map, heightmaps, masks, tables', run: () => setExporting(['image', 'provinces', 'heightmap', 'terrain', 'tables', 'gamedata']) },
+          { label: t('Game data'), hint: t('Hexes, provinces, realms and layers as JSON'), run: onExportData },
+          { label: t('Data layers'), hint: t('One CSV table per layer, zipped'), run: onExportCsv, disabled: !layers.length },
+          { label: t('Image of this view'), hint: t('PNG at screen resolution'), run: onExportImage },
+          { label: t('High-resolution image…'), hint: t('The whole world, up to 16,384 px wide'), run: () => setExporting(['image']) },
+          { label: t('All map modes…'), hint: t('One image per map mode and data layer, zipped'), run: () => setExporting(['modes']) },
+          { label: t('Export set…'), hint: t('Image, province map, heightmaps, masks, tables'), run: () => setExporting(['image', 'provinces', 'heightmap', 'terrain', 'tables', 'gamedata']) },
         ]}
       />
       <SidePanel tab={tab} onTab={changeTab}>
@@ -275,7 +277,7 @@ export function App() {
             onAdjustLabelEnd={editor.endAdjustLabel}
             onShowAllLabels={() =>
               editor.change(
-                'Show hidden names',
+                t('Show hidden names'),
                 (m) => {
                   for (const e of Object.values(m.labels ?? {})) delete e.hidden;
                 },
@@ -330,7 +332,7 @@ export function App() {
       {error && (
         <div className="toast" role="alert">
           {error}
-          <button className="icon-btn" onClick={() => setError(null)} aria-label="Dismiss">
+          <button className="icon-btn" onClick={() => setError(null)} aria-label={t('Dismiss')}>
             ×
           </button>
         </div>
@@ -343,11 +345,11 @@ function labelName(map: MapData | undefined, key: string | null): string | null 
   if (!map || !key) return null;
   const [kind, id] = key.split(':');
   const n = Number(id);
-  if (kind === 'realm') return `${map.realms[n]?.title} of ${map.realms[n]?.name}`;
-  if (kind === 'region') return `Region of ${map.regions[n]?.name}`;
+  if (kind === 'realm') return t('{title} of {name}', { title: t(map.realms[n]?.title ?? ''), name: map.realms[n]?.name ?? '' });
+  if (kind === 'region') return t('Region of {name}', { name: map.regions[n]?.name ?? '' });
   return map.provinces[n]?.name ?? null;
 }
 
 function download(blob: Blob, name: string) {
-  saveFile(blob, name).catch((e) => window.dispatchEvent(new CustomEvent('carto-error', { detail: `The file could not be saved: ${(e as Error).message}` })));
+  saveFile(blob, name).catch((e) => window.dispatchEvent(new CustomEvent('carto-error', { detail: t('The file could not be saved: {msg}', { msg: (e as Error).message }) })));
 }

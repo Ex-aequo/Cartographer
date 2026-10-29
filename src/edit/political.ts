@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import type { MapData, Province } from '../model/types';
 import { HexFlag } from '../model/types';
 import { buildNeighbors, hexCenterX, hexCenterY } from '../model/hex';
@@ -105,7 +106,7 @@ export function splitProvince(map: MapData, path: number[]): { ok: true; created
       target = p;
     }
   });
-  if (target < 0) return { ok: false, message: 'Draw the line across a province.' };
+  if (target < 0) return { ok: false, message: t('Draw the line across a province.') };
   const prov = map.provinces[target];
   const cut = new Set(path.filter((h) => map.hex.province[h] === target));
   const rest = prov.hexes.filter((h) => !cut.has(h) && map.hex.province[h] === target);
@@ -129,7 +130,7 @@ export function splitProvince(map: MapData, path: number[]): { ok: true; created
   }
   // ignore crumbs the line happened to isolate
   const parts = comps.filter((c) => c.length >= 2);
-  if (parts.length < 2) return { ok: false, message: `Draw the line all the way across ${prov.name}, from border to border.` };
+  if (parts.length < 2) return { ok: false, message: t('Draw the line all the way across {name}, from border to border.', { name: prov.name }) };
   let keep = parts.findIndex((c) => c.includes(prov.capitalHex));
   if (keep < 0) keep = parts.reduce((b, c, k) => (c.length > parts[b].length ? k : b), 0);
   const created: number[] = [];
@@ -161,10 +162,10 @@ export function splitProvince(map: MapData, path: number[]): { ok: true; created
 
 /** Merges province `b` into neighbouring province `a`. */
 export function mergeProvinces(map: MapData, a: number, b: number): { ok: true } | { ok: false; message: string } {
-  if (a === b || a < 0 || b < 0) return { ok: false, message: 'Drag from one province into a neighbouring one.' };
+  if (a === b || a < 0 || b < 0) return { ok: false, message: t('Drag from one province into a neighbouring one.') };
   const pa = map.provinces[a];
   const pb = map.provinces[b];
-  if (!pa.neighbors.includes(b)) return { ok: false, message: `${pa.name} and ${pb.name} do not share a border, so they cannot be merged.` };
+  if (!pa.neighbors.includes(b)) return { ok: false, message: t('{a} and {b} do not share a border, so they cannot be merged.', { a: pa.name, b: pb.name }) };
   for (const h of pb.hexes) if (map.hex.province[h] === b) map.hex.province[h] = a;
   return { ok: true };
 }

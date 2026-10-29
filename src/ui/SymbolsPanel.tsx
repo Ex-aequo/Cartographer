@@ -1,3 +1,4 @@
+import { t, tn, num } from '../i18n';
 import { useMemo, useRef, useState } from 'react';
 import type { MapData } from '../model/types';
 import {
@@ -40,6 +41,9 @@ interface Props {
   notify(msg: string): void;
 }
 
+/** Built-in symbols and sets have English names in the data; show them translated. */
+const nameOf = (a: { id: string; name: string }) => (a.id.startsWith('ink') ? t(a.name) : a.name);
+
 const thumb = (a: SymbolAsset) => (a.kind === 'svg' ? 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(a.data) : a.data);
 
 /** The Symbols tab: a library of pictures, placing them, and town marks. */
@@ -67,7 +71,7 @@ export function SymbolsPanel(p: Props) {
     const all = Array.from(list).filter((f) => /\.(svg|png)$/i.test(f.name) || f.type === 'image/svg+xml' || f.type === 'image/png');
     const skipped = Array.from(list).length - all.length;
     if (!all.length) {
-      p.notify('Only SVG and PNG files can be added as symbols.');
+      p.notify(t('Only SVG and PNG files can be added as symbols.'));
       return;
     }
     const ok: { name: string; bytes: Uint8Array }[] = [];
@@ -77,10 +81,10 @@ export function SymbolsPanel(p: Props) {
     let added = 0;
     let firstId: string | null = null;
     p.change(
-      all.length === 1 ? `Add ${all[0].name}` : `Add ${all.length} symbols`,
+      all.length === 1 ? t('Add {name}', { name: all[0].name }) : t('Add {n} symbols', { n: all.length }),
       (m) => {
         const s = ensureSymbols(m);
-        if (!s.sets.some((x) => x.id === target)) s.sets.push({ id: target, name: 'My symbols' });
+        if (!s.sets.some((x) => x.id === target)) s.sets.push({ id: target, name: t('My symbols') });
         for (const f of ok) {
           try {
             const a = assetFromFile(f.name, f.bytes, target, newAssetId(m));
@@ -88,17 +92,17 @@ export function SymbolsPanel(p: Props) {
             firstId ??= a.id;
             added++;
           } catch (e) {
-            problems.push(e instanceof ImportError ? e.message : `${f.name} could not be read.`);
+            problems.push(e instanceof ImportError ? e.message : t('{file} could not be read.', { file: f.name }));
           }
         }
       },
       'instant',
     );
     const notes: string[] = [];
-    if (added) notes.push(`Added ${added} ${added === 1 ? 'symbol' : 'symbols'}.`);
-    if (skipped) notes.push(`${skipped} ${skipped === 1 ? 'file was' : 'files were'} not SVG or PNG and ${skipped === 1 ? 'was' : 'were'} skipped.`);
+    if (added) notes.push(tn('Added {n} symbol.', 'Added {n} symbols.', added));
+    if (skipped) notes.push(tn('{n} file was not SVG or PNG and was skipped.', '{n} files were not SVG or PNG and were skipped.', skipped));
     notes.push(...problems.slice(0, 3));
-    if (problems.length > 3) notes.push(`…and ${problems.length - 3} more could not be added.`);
+    if (problems.length > 3) notes.push(t('…and {n} more could not be added.', { n: problems.length - 3 }));
     if (problems.length || skipped) p.notify(notes.join(' '));
     if (firstId) {
       setSetFilter(target);
@@ -111,7 +115,7 @@ export function SymbolsPanel(p: Props) {
       const text = await file.text();
       let n = 0;
       p.change(
-        `Load ${file.name}`,
+        t('Load {name}', { name: file.name }),
         (m) => {
           const { set, assets: list } = readSetFile(text, () => newAssetId(m));
           const s = ensureSymbols(m);
@@ -121,9 +125,9 @@ export function SymbolsPanel(p: Props) {
         },
         'instant',
       );
-      p.notify(`Loaded ${n} ${n === 1 ? 'symbol' : 'symbols'} from ${file.name}.`);
+      p.notify(tn('Loaded {n} symbol from {name}.', 'Loaded {n} symbols from {name}.', n, { name: file.name }));
     } catch (e) {
-      p.notify(e instanceof ImportError ? e.message : `That set could not be loaded. ${(e as Error).message}`);
+      p.notify(e instanceof ImportError ? e.message : t('That set could not be loaded. {msg}', { msg: (e as Error).message }));
     }
   };
 
@@ -152,17 +156,17 @@ export function SymbolsPanel(p: Props) {
       }}
     >
       <fieldset className="field">
-        <legend>Library</legend>
+        <legend>{t('Library')}</legend>
         <div className="field__row">
-          <select value={setFilter} onChange={(e) => setSetFilter(e.target.value)} aria-label="Symbol set">
-            <option value="all">All sets</option>
+          <select value={setFilter} onChange={(e) => setSetFilter(e.target.value)} aria-label={t('Symbol set')}>
+            <option value="all">{t('All sets')}</option>
             {sets.map((s) => (
               <option key={s.id} value={s.id}>
-                {s.name}
+                {nameOf(s)}
               </option>
             ))}
           </select>
-          <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Find by name or tag" aria-label="Find symbols" />
+          <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t('Find by name or tag')} aria-label={t('Find symbols')} />
         </div>
         <div className="sym-grid" role="listbox" aria-label="Symbols">
           {shown.map((a) => (
@@ -172,27 +176,27 @@ export function SymbolsPanel(p: Props) {
               role="option"
               aria-selected={p.armed === a.id}
               className={`sym ${p.armed === a.id ? 'is-armed' : ''} ${picked === a.id && p.armed !== a.id ? 'is-picked' : ''}`}
-              title={`${a.name}${a.tags.length ? ` — ${a.tags.join(', ')}` : ''}`}
+              title={`${nameOf(a)}${a.tags.length ? ` — ${a.tags.map((x) => (a.id.startsWith('ink:') ? t(x) : x)).join(', ')}` : ''}`}
               onClick={() => arm(a.id)}
             >
               <img src={thumb(a)} alt="" draggable={false} />
-              <span>{a.name}</span>
+              <span>{nameOf(a)}</span>
             </button>
           ))}
-          {shown.length === 0 && <p className="hint">No symbols match.</p>}
+          {shown.length === 0 && <p className="hint">{t('No symbols match.')}</p>}
         </div>
-        <p className="hint">{p.armed ? 'Click the map to place it. Hold Shift to snap it to a hex and pin it there. Click the symbol again to stop.' : 'Click a symbol, then click the map to place it. With none chosen, click a placed symbol to select it; drag to move it.'}</p>
+        <p className="hint">{t(p.armed ? 'Click the map to place it. Hold Shift to snap it to a hex and pin it there. Click the symbol again to stop.' : 'Click a symbol, then click the map to place it. With none chosen, click a placed symbol to select it; drag to move it.')}</p>
         <div className="history">
-          <button type="button" className="btn btn--ghost" onClick={() => files.current?.click()} title="SVG or PNG, up to 2 MB each. You can also drop files on this panel.">
-            Add pictures…
+          <button type="button" className="btn btn--ghost" onClick={() => files.current?.click()} title={t('SVG or PNG, up to 2 MB each. You can also drop files on this panel.')}>
+            {t('Add pictures…')}
           </button>
           <button type="button" className="btn btn--ghost" onClick={() => folder.current?.click()}>
-            Add a folder…
+            {t('Add a folder…')}
           </button>
         </div>
         {ownSets.length > 1 && (
           <label className="field field--inline">
-            <span>Add new pictures to</span>
+            <span>{t('Add new pictures to')}</span>
             <select value={importSet} onChange={(e) => setImportSet(e.target.value)}>
               {ownSets.map((s) => (
                 <option key={s.id} value={s.id}>
@@ -218,33 +222,33 @@ export function SymbolsPanel(p: Props) {
             className="btn btn--ghost"
             onClick={() => {
               const id = `set${Date.now().toString(36)}`;
-              p.change('New symbol set', (m) => void ensureSymbols(m).sets.push({ id, name: `Set ${(m.symbols?.sets.length ?? 0) + 1}` }), 'instant');
+              p.change(t('New symbol set'), (m) => void ensureSymbols(m).sets.push({ id, name: t('Set {n}', { n: (m.symbols?.sets.length ?? 0) + 1 }) }), 'instant');
               setSetFilter(id);
               setImportSet(id);
             }}
           >
-            New set
+            {t('New set')}
           </button>
           <button type="button" className="btn btn--ghost" onClick={() => setInput.current?.click()}>
-            Load set
+            {t('Load set')}
           </button>
           <button
             type="button"
             className="btn btn--ghost"
             disabled={setFilter === 'all'}
-            title={setFilter === 'all' ? 'Choose a set above to save it' : 'Save this set as a file to use on other maps'}
+            title={t(setFilter === 'all' ? 'Choose a set above to save it' : 'Save this set as a file to use on other maps')}
             onClick={() => {
               const name = sets.find((s) => s.id === setFilter)?.name ?? 'symbols';
               p.onDownload(new Blob([setFile(p.map, setFilter)], { type: 'application/json' }), `${name.replace(/[^\w-]+/g, '_')}.symbols.json`);
             }}
           >
-            Save set
+            {t('Save set')}
           </button>
         </div>
         {ownSets.some((s) => s.id === setFilter) && (
           <label className="field">
-            <span>Set name</span>
-            <TextField value={ownSets.find((s) => s.id === setFilter)!.name} onCommit={(v) => v && p.change('Rename set', (m) => void (m.symbols!.sets.find((s) => s.id === setFilter)!.name = v), 'instant')} />
+            <span>{t('Set name')}</span>
+            <TextField value={ownSets.find((s) => s.id === setFilter)!.name} onCommit={(v) => v && p.change(t('Rename set'), (m) => void (m.symbols!.sets.find((s) => s.id === setFilter)!.name = v), 'instant')} />
           </label>
         )}
       </fieldset>
@@ -253,16 +257,20 @@ export function SymbolsPanel(p: Props) {
 
       {p.armed && !p.selected && (
         <fieldset className="field">
-          <legend>New symbols</legend>
+          <legend>{t('New symbols')}</legend>
           <PlacementControls value={p.opts} onChange={(patch) => p.onOpts({ ...p.opts, ...patch })} onEnd={() => {}} />
         </fieldset>
       )}
 
       {p.selected && (
         <fieldset className="field">
-          <legend>Selected symbol</legend>
+          <legend>{t('Selected symbol')}</legend>
           <p className="muted small">
-            {assets.find((a) => a.id === p.selected!.asset)?.name ?? 'Missing picture'} · {p.selected.hex >= 0 ? `pinned to hex ${p.selected.hex % p.map.grid.cols}, ${Math.floor(p.selected.hex / p.map.grid.cols)}` : 'floating'}
+            {(() => {
+              const a = assets.find((x) => x.id === p.selected!.asset);
+              return a ? nameOf(a) : t('Missing picture');
+            })()}{' '}
+            · {p.selected.hex >= 0 ? t('pinned to hex {col}, {row}', { col: p.selected.hex % p.map.grid.cols, row: Math.floor(p.selected.hex / p.map.grid.cols) }) : t('floating')}
           </p>
           <PlacementControls value={p.selected} onChange={p.onAdjust} onEnd={p.onAdjustEnd} />
           <label className="check">
@@ -271,7 +279,7 @@ export function SymbolsPanel(p: Props) {
               checked={p.selected.hex >= 0}
               onChange={(e) =>
                 p.change(
-                  e.target.checked ? 'Pin symbol' : 'Unpin symbol',
+                  t(e.target.checked ? 'Pin symbol' : 'Unpin symbol'),
                   (m) => {
                     const pl = m.symbols?.placements.find((x) => x.id === p.selected!.id);
                     if (!pl) return;
@@ -282,15 +290,14 @@ export function SymbolsPanel(p: Props) {
                 )
               }
             />
-            Pinned to its hex (part of the game data)
+            {t('Pinned to its hex (part of the game data)')}
           </label>
           <div className="history">
             <button
               type="button"
               className="btn btn--ghost"
               onClick={() =>
-                p.change(
-                  'Bring to front',
+                p.change(t('Bring to front'),
                   (m) => {
                     const s = m.symbols!;
                     const i = s.placements.findIndex((x) => x.id === p.selected!.id);
@@ -300,13 +307,13 @@ export function SymbolsPanel(p: Props) {
                 )
               }
             >
-              To front
+              {t('To front')}
             </button>
-            <button type="button" className="btn btn--ghost btn--danger" onClick={p.onDelete} title="Delete or Backspace">
-              Delete
+            <button type="button" className="btn btn--ghost btn--danger" onClick={p.onDelete} title={t('Delete or Backspace')}>
+              {t('Delete')}
             </button>
             <button type="button" className="btn btn--ghost" onClick={p.onDeselect}>
-              Done
+              {t('Done')}
             </button>
           </div>
         </fieldset>
@@ -327,17 +334,17 @@ function AssetEditor({ map, asset, change, onRemoved }: { map: MapData; asset: S
   }, 'instant');
   return (
     <fieldset className="field">
-      <legend>Picture</legend>
+      <legend>{t('Picture')}</legend>
       <label className="field">
-        <span>Name</span>
-        <TextField value={asset.name} onCommit={(v) => v && v !== asset.name && upd('Rename symbol', (a) => void (a.name = v))} />
+        <span>{t('Name')}</span>
+        <TextField value={asset.name} onCommit={(v) => v && v !== asset.name && upd(t('Rename symbol'), (a) => void (a.name = v))} />
       </label>
       <label className="field">
-        <span>Tags, separated by commas</span>
+        <span>{t('Tags, separated by commas')}</span>
         <TextField
           value={asset.tags.join(', ')}
           onCommit={(v) =>
-            upd('Tag symbol', (a) => {
+            upd(t('Tag symbol'), (a) => {
               a.tags = v
                 .split(',')
                 .map((t) => t.trim())
@@ -348,28 +355,28 @@ function AssetEditor({ map, asset, change, onRemoved }: { map: MapData; asset: S
       </label>
       {own.length > 1 && (
         <label className="field">
-          <span>Set</span>
-          <select value={asset.set} onChange={(e) => upd('Move symbol', (a) => void (a.set = e.target.value))}>
+          <span>{t('Set')}</span>
+          <select value={asset.set} onChange={(e) => upd(t('Move symbol'), (a) => void (a.set = e.target.value))}>
             {own.map((s) => (
               <option key={s.id} value={s.id}>
-                {s.name}
+                {nameOf(s)}
               </option>
             ))}
           </select>
         </label>
       )}
       <p className="muted small">
-        {asset.kind.toUpperCase()}, {Math.round(asset.w)} × {Math.round(asset.h)} · placed {uses} {uses === 1 ? 'time' : 'times'}
+        {asset.kind.toUpperCase()}, {Math.round(asset.w)} × {Math.round(asset.h)} · {tn('placed {n} time', 'placed {n} times', uses)}
       </p>
       <button
         type="button"
         className="btn btn--ghost btn--wide btn--danger"
         onClick={() => {
-          change(`Remove ${asset.name}`, (m) => void removeAsset(m, asset.id), 'instant');
+          change(t('Remove {name}', { name: asset.name }), (m) => void removeAsset(m, asset.id), 'instant');
           onRemoved();
         }}
       >
-        Remove from library{uses ? ` and the map (${uses})` : ''}
+        {uses ? t('Remove from library and the map ({n})', { n: num(uses) }) : t('Remove from library')}
       </button>
     </fieldset>
   );
@@ -378,9 +385,9 @@ function AssetEditor({ map, asset, change, onRemoved }: { map: MapData; asset: S
 function PlacementControls({ value, onChange, onEnd }: { value: PlaceOptions; onChange(p: Partial<PlaceOptions>): void; onEnd(label: string): void }) {
   return (
     <>
-      <Slider label="Size" value={value.size} min={0.6} max={24} step={0.1} format={(v) => `${(v / 1.732).toFixed(1)} hexes`} onChange={(v) => onChange({ size: v })} onEnd={() => onEnd('Resize symbol')} log />
-      <Slider label="Turn" value={value.rotation} min={-180} max={180} step={1} format={(v) => `${Math.round(v)}°`} onChange={(v) => onChange({ rotation: v })} onEnd={() => onEnd('Turn symbol')} />
-      <Slider label="Opacity" value={value.opacity} min={0.1} max={1} step={0.05} format={(v) => `${Math.round(v * 100)}%`} onChange={(v) => onChange({ opacity: v })} onEnd={() => onEnd('Fade symbol')} />
+      <Slider label={t('Size')} value={value.size} min={0.6} max={24} step={0.1} format={(v) => t('{n} hexes', { n: num(Math.round((v / 1.732) * 10) / 10) })} onChange={(v) => onChange({ size: v })} onEnd={() => onEnd(t('Resize symbol'))} log />
+      <Slider label={t('Turn')} value={value.rotation} min={-180} max={180} step={1} format={(v) => `${Math.round(v)}°`} onChange={(v) => onChange({ rotation: v })} onEnd={() => onEnd(t('Turn symbol'))} />
+      <Slider label={t('Opacity')} value={value.opacity} min={0.1} max={1} step={0.05} format={(v) => `${Math.round(v * 100)}%`} onChange={(v) => onChange({ opacity: v })} onEnd={() => onEnd(t('Fade symbol'))} />
       <div className="sym-opts">
         <label className="check check--tight">
           <input
@@ -388,10 +395,10 @@ function PlacementControls({ value, onChange, onEnd }: { value: PlaceOptions; on
             checked={value.flip}
             onChange={(e) => {
               onChange({ flip: e.target.checked });
-              onEnd('Mirror symbol');
+              onEnd(t('Mirror symbol'));
             }}
           />
-          Mirror
+          {t('Mirror')}
         </label>
         <label className="check check--tight" title="Redraw in the map's brown ink and parchment">
           <input
@@ -399,10 +406,10 @@ function PlacementControls({ value, onChange, onEnd }: { value: PlaceOptions; on
             checked={value.ink}
             onChange={(e) => {
               onChange({ ink: e.target.checked });
-              onEnd('Ink look');
+              onEnd(t('Ink look'));
             }}
           />
-          Ink look
+          {t('Ink look')}
         </label>
         <label className="check check--tight">
           <input
@@ -410,53 +417,53 @@ function PlacementControls({ value, onChange, onEnd }: { value: PlaceOptions; on
             checked={!!value.tint}
             onChange={(e) => {
               onChange({ tint: e.target.checked ? [178, 64, 52] : null });
-              onEnd('Tint symbol');
+              onEnd(t('Tint symbol'));
             }}
           />
-          Tint
+          {t('Tint')}
         </label>
         {value.tint && (
           <ColorInput
             color={value.tint}
             onCommit={(c) => {
               onChange({ tint: c });
-              onEnd('Tint symbol');
+              onEnd(t('Tint symbol'));
             }}
-            label="Tint colour"
+            label={t('Tint colour')}
           />
         )}
       </div>
       <div className="field__row levels">
         <label className="field">
-          <span>Shown from</span>
+          <span>{t('Shown from')}</span>
           <select
             value={value.minLevel}
             onChange={(e) => {
               const v = Number(e.target.value) as Level;
               onChange({ minLevel: v, maxLevel: Math.max(v, value.maxLevel) as Level });
-              onEnd('Zoom range');
+              onEnd(t('Zoom range'));
             }}
           >
             {LEVEL_NAMES.map((n, i) => (
               <option key={n} value={i}>
-                {n}
+                {t(n)}
               </option>
             ))}
           </select>
         </label>
         <label className="field">
-          <span>to</span>
+          <span>{t('to')}</span>
           <select
             value={value.maxLevel}
             onChange={(e) => {
               const v = Number(e.target.value) as Level;
               onChange({ maxLevel: v, minLevel: Math.min(v, value.minLevel) as Level });
-              onEnd('Zoom range');
+              onEnd(t('Zoom range'));
             }}
           >
             {LEVEL_NAMES.map((n, i) => (
               <option key={n} value={i}>
-                {n}
+                {t(n)}
               </option>
             ))}
           </select>
@@ -490,7 +497,7 @@ function Slider(props: { label: string; value: number; min: number; max: number;
   );
 }
 
-const MODE_NAMES: Record<SettlementMode, string> = {
+export const MODE_NAMES: Record<SettlementMode, string> = {
   keep: 'The standard keep',
   size: 'By importance',
   realm: 'By realm',
@@ -503,14 +510,14 @@ function TownMarks({ map, assets, sets, change }: { map: MapData; assets: Symbol
   const set = (label: string, fn: (s: NonNullable<typeof st>) => void) => change(label, (m) => fn(ensureSymbols(m).settlements), 'instant');
   const picker = (value: string | undefined, onPick: (v: string | undefined) => void, label: string) => (
     <select value={value ?? ''} onChange={(e) => onPick(e.target.value || undefined)} aria-label={label}>
-      <option value="">Standard keep</option>
+      <option value="">{t('Standard keep')}</option>
       {sets.map((s) => (
-        <optgroup key={s.id} label={s.name}>
+        <optgroup key={s.id} label={nameOf(s)}>
           {assets
             .filter((a) => a.set === s.id)
             .map((a) => (
               <option key={a.id} value={a.id}>
-                {a.name}
+                {nameOf(a)}
               </option>
             ))}
         </optgroup>
@@ -519,13 +526,13 @@ function TownMarks({ map, assets, sets, change }: { map: MapData; assets: Symbol
   );
   return (
     <fieldset className="field">
-      <legend>Town marks</legend>
+      <legend>{t('Town marks')}</legend>
       <label className="field">
-        <span>Mark each province’s town with</span>
-        <select value={mode} onChange={(e) => set('Town marks', (s) => void (s.mode = e.target.value as SettlementMode))}>
+        <span>{t('Mark each province’s town with')}</span>
+        <select value={mode} onChange={(e) => set(t('Town marks'), (s) => void (s.mode = e.target.value as SettlementMode))}>
           {(Object.keys(MODE_NAMES) as SettlementMode[]).map((k) => (
             <option key={k} value={k}>
-              {MODE_NAMES[k]}
+              {t(MODE_NAMES[k])}
             </option>
           ))}
         </select>
@@ -540,8 +547,8 @@ function TownMarks({ map, assets, sets, change }: { map: MapData; assets: Symbol
             ] as const
           ).map(([k, label]) => (
             <label key={k} className="field">
-              <span>{label}</span>
-              {picker(st.size[k], (v) => set('Town marks', (s) => void (v ? (s.size[k] = v) : delete s.size[k])), label)}
+              <span>{t(label)}</span>
+              {picker(st.size[k], (v) => set(t('Town marks'), (s) => void (v ? (s.size[k] = v) : delete s.size[k])), label)}
             </label>
           ))}
         </div>
@@ -556,7 +563,7 @@ function TownMarks({ map, assets, sets, change }: { map: MapData; assets: Symbol
                   <i className="dot" style={{ background: `rgb(${r.color.join(',')})` }} />
                   {r.name}
                 </span>
-                {picker(st.realm[r.id], (v) => set('Town marks', (s) => void (v ? (s.realm[r.id] = v) : delete s.realm[r.id])), r.name)}
+                {picker(st.realm[r.id], (v) => set(t('Town marks'), (s) => void (v ? (s.realm[r.id] = v) : delete s.realm[r.id])), r.name)}
               </label>
             ))}
         </div>
@@ -568,7 +575,7 @@ function TownMarks({ map, assets, sets, change }: { map: MapData; assets: Symbol
             .map((c) => (
               <label key={c.id} className="field">
                 <span>{c.name}</span>
-                {picker(st.culture[c.id], (v) => set('Town marks', (s) => void (v ? (s.culture[c.id] = v) : delete s.culture[c.id])), c.name)}
+                {picker(st.culture[c.id], (v) => set(t('Town marks'), (s) => void (v ? (s.culture[c.id] = v) : delete s.culture[c.id])), c.name)}
               </label>
             ))}
         </div>
@@ -577,14 +584,14 @@ function TownMarks({ map, assets, sets, change }: { map: MapData; assets: Symbol
         <>
           <label className="field">
             <span className="field__label">
-              Mark size
+              {t('Mark size')}
               <output>{Math.round(st.scale * 100)}%</output>
             </span>
-            <input type="range" min={0.5} max={3} step={0.05} defaultValue={st.scale} onPointerUp={(e) => set('Town mark size', (s) => void (s.scale = Number((e.target as HTMLInputElement).value)))} onKeyUp={(e) => set('Town mark size', (s) => void (s.scale = Number((e.target as HTMLInputElement).value)))} />
+            <input type="range" min={0.5} max={3} step={0.05} defaultValue={st.scale} onPointerUp={(e) => set(t('Town mark size'), (s) => void (s.scale = Number((e.target as HTMLInputElement).value)))} onKeyUp={(e) => set(t('Town mark size'), (s) => void (s.scale = Number((e.target as HTMLInputElement).value)))} />
           </label>
           <label className="check">
-            <input type="checkbox" checked={st.ink} onChange={(e) => set('Town mark ink', (s) => void (s.ink = e.target.checked))} />
-            Ink look for town marks
+            <input type="checkbox" checked={st.ink} onChange={(e) => set(t('Town mark ink'), (s) => void (s.ink = e.target.checked))} />
+            {t('Ink look for town marks')}
           </label>
         </>
       )}

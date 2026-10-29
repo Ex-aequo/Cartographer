@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Terrain, type LabelEdit, type MapData } from '../model/types';
 import { EditSession, type ChangeToken, type StepRecord, type ToolSettings } from '../edit/session';
@@ -47,7 +48,7 @@ export function useEditor(loaded: LoadedMap | null, setLoaded: (l: LoadedMap) =>
         after(l);
         setLoaded(l);
       } catch (e) {
-        notify(`The map could not be updated: ${(e as Error).message}`);
+        notify(t('The map could not be updated: {msg}', { msg: (e as Error).message }));
       } finally {
         workingRef.current = false;
         setWorking(false);

@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { restoreSymbols, snapshotSymbols, type SymbolSnapshot } from '../model/symbols';
 import type { LabelEdit, MapData } from '../model/types';
 import { layersOf, rollUps, runRules, type DataLayer } from '../model/layers';
@@ -247,12 +248,12 @@ export class EditSession {
     else if (settings.tool === 'region') target = p0 >= 0 ? map.provinces[p0].region : -1;
     else if (settings.tool === 'realm') target = p0 >= 0 ? map.regions[map.provinces[p0].region].realm : -1;
     if (['assign', 'region', 'realm'].includes(settings.tool) && target < 0) {
-      this.message = 'Start the stroke on land, inside the province, region or realm you want to extend.';
+      this.message = t('Start the stroke on land, inside the province, region or realm you want to extend.');
       return;
     }
     if (settings.tool === 'label' && !ctx.labelKey) return;
     if (settings.tool === 'layer' && !layersOf(map).some((l) => l.def.id === settings.layer)) {
-      this.message = 'Pick a data layer to paint first.';
+      this.message = t('Pick a data layer to paint first.');
       return;
     }
     const isHeight = HEIGHT_TOOLS.includes(settings.tool) || settings.tool === 'river';
@@ -341,7 +342,7 @@ export class EditSession {
       rollUps(map);
     }
     const rec: StepRecord = {
-      label: TOOL_LABELS[tool],
+      label: t(TOOL_LABELS[tool]),
       kind: tool === 'label' || tool === 'layer' ? 'instant' : undefined,
       layers: s.layersBefore ? layerStep(s.layersBefore, map) : undefined,
       riverPathsBefore: s.riverPathsBefore,

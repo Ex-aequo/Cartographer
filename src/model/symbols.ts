@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import type { MapData } from './types';
 import { hexAt, hexCenterX, hexCenterY } from './hex';
 import { INK_ASSETS, INK_SET } from '../symbols/inkSet';
@@ -83,7 +84,7 @@ export const levelOf = (zoom: number): Level => (zoom >= LEVEL_FROM[3] ? 3 : zoo
 
 export function emptySymbols(): SymbolData {
   return {
-    sets: [{ id: 'mine', name: 'My symbols' }],
+    sets: [{ id: 'mine', name: t('My symbols') }],
     assets: [],
     placements: [],
     nextId: 1,
@@ -208,24 +209,24 @@ export class ImportError extends Error {}
  */
 export function assetFromFile(name: string, bytes: Uint8Array, set: string, id: string): SymbolAsset {
   const base = name.replace(/^.*[\\/]/, '');
-  if (bytes.length > MAX_ASSET_BYTES) throw new ImportError(`${base} is larger than 2 MB (${(bytes.length / 1048576).toFixed(2)} MB), the limit for a symbol. Shrink or simplify it and try again.`);
+  if (bytes.length > MAX_ASSET_BYTES) throw new ImportError(t('{file} is larger than 2 MB ({size} MB), the limit for a symbol. Shrink or simplify it and try again.', { file: base, size: (bytes.length / 1048576).toFixed(2) }));
   const label = prettyName(base);
   const isPng = bytes.length > 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
   if (isPng) {
     const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
     const w = dv.getUint32(16);
     const h = dv.getUint32(20);
-    if (!w || !h) throw new ImportError(`${base} is not a readable PNG image.`);
+    if (!w || !h) throw new ImportError(t('{file} is not a readable PNG image.', { file: base }));
     return { id, name: label, set, tags: [], kind: 'png', data: `data:image/png;base64,${toBase64(bytes)}`, w, h };
   }
   const text = new TextDecoder().decode(bytes);
   if (/\.svg$/i.test(base) || /<svg[\s>]/i.test(text)) {
     const svg = sanitizeSvg(text);
-    if (!svg) throw new ImportError(`${base} does not contain an SVG picture.`);
+    if (!svg) throw new ImportError(t('{file} does not contain an SVG picture.', { file: base }));
     const [w, h] = svgSize(svg);
     return { id, name: label, set, tags: [], kind: 'svg', data: svg, w, h };
   }
-  throw new ImportError(`${base} is not an SVG or PNG file.`);
+  throw new ImportError(t('{file} is not an SVG or PNG file.', { file: base }));
 }
 
 export function sanitizeSvg(text: string): string | null {
@@ -288,9 +289,9 @@ export function readSetFile(text: string, newId: () => string): { set: SymbolSet
   try {
     obj = JSON.parse(text);
   } catch {
-    throw new ImportError('That file is not a Cartographer symbol set.');
+    throw new ImportError(t('That file is not a Cartographer symbol set.'));
   }
-  if (obj?.format !== SET_FORMAT || !Array.isArray(obj.assets)) throw new ImportError('That file is not a Cartographer symbol set.');
+  if (obj?.format !== SET_FORMAT || !Array.isArray(obj.assets)) throw new ImportError(t('That file is not a Cartographer symbol set.'));
   const setId = newId();
   const set: SymbolSet = { id: setId, name: String(obj.set?.name ?? 'Imported symbols') };
   const assets: SymbolAsset[] = [];

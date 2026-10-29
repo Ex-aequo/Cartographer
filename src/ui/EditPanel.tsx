@@ -1,15 +1,16 @@
+import { t, tn, num } from '../i18n';
 import { TERRAIN_NAMES, type LabelEdit } from '../model/types';
 import { TERRAIN_COLORS } from '../render/mapModes';
 import { HEIGHT_TOOLS, PAINTABLE, TOOL_LABELS, type ToolId, type ToolSettings } from '../edit/session';
 
-const GROUPS: { name: string; tools: ToolId[] }[] = [
+export const GROUPS: { name: string; tools: ToolId[] }[] = [
   { name: 'Land', tools: ['raise', 'lower', 'smooth', 'flatten', 'paint'] },
   { name: 'Water', tools: ['river', 'erase-river', 'lake', 'drain'] },
   { name: 'Borders', tools: ['assign', 'split', 'merge', 'region', 'realm'] },
   { name: 'Words', tools: ['label'] },
 ];
 
-const HINTS: Record<ToolId, string> = {
+export const HINTS: Record<ToolId, string> = {
   raise: 'Drag to build land up. Hold still to keep building. Raised sea floor becomes new land.',
   lower: 'Drag to wear land down. Below sea level it floods.',
   smooth: 'Drag to soften rough ground.',
@@ -59,25 +60,25 @@ export function EditPanel(p: Props) {
     <div className="panel__body edit">
       {GROUPS.map((g) => (
         <fieldset key={g.name} className="field">
-          <legend>{g.name}</legend>
+          <legend>{t(g.name)}</legend>
           <div className="tools">
-            {g.tools.map((t) => (
-              <button key={t} type="button" className={`tool ${s.tool === t ? 'is-on' : ''}`} aria-pressed={s.tool === t} onClick={() => set({ tool: s.tool === t ? null : t })}>
-                <ToolIcon tool={t} />
-                {TOOL_LABELS[t]}
+            {g.tools.map((tool) => (
+              <button key={tool} type="button" className={`tool ${s.tool === tool ? 'is-on' : ''}`} aria-pressed={s.tool === tool} onClick={() => set({ tool: s.tool === tool ? null : tool })}>
+                <ToolIcon tool={tool} />
+                {t(TOOL_LABELS[tool])}
               </button>
             ))}
           </div>
         </fieldset>
       ))}
 
-      {s.tool ? <p className="hint">{HINTS[s.tool]} Right-drag or hold Space to move the map.</p> : <p className="hint">Pick a tool to start. Click a province with no tool to rename it. Every change can be undone.</p>}
+      {s.tool ? <p className="hint">{t(HINTS[s.tool])} {t('Right-drag or hold Space to move the map.')}</p> : <p className="hint">{t('Pick a tool to start. Click a province with no tool to rename it. Every change can be undone.')}</p>}
 
       {s.tool && BRUSH_TOOLS.includes(s.tool) && (
         <label className="field">
           <span className="field__label">
-            Brush size
-            <output>{hexes < 1.5 ? 'One hex' : `${Math.round(hexes * 2)} hexes across`}</output>
+            {t('Brush size')}
+            <output>{hexes < 1.5 ? t('One hex') : t('{n} hexes across', { n: Math.round(hexes * 2) })}</output>
           </span>
           <input type="range" min={0.6} max={20} step={0.2} value={s.radius} onChange={(e) => set({ radius: Number(e.target.value) })} />
         </label>
@@ -85,20 +86,20 @@ export function EditPanel(p: Props) {
       {s.tool && HEIGHT_TOOLS.includes(s.tool) && (
         <label className="field">
           <span className="field__label">
-            Strength
-            <output>{s.strength < 0.35 ? 'Gentle' : s.strength < 0.75 ? 'Medium' : 'Strong'}</output>
+            {t('Strength')}
+            <output>{t(s.strength < 0.35 ? 'Gentle' : s.strength < 0.75 ? 'Medium' : 'Strong')}</output>
           </span>
           <input type="range" min={0.1} max={1} step={0.05} value={s.strength} onChange={(e) => set({ strength: Number(e.target.value) })} />
         </label>
       )}
       {s.tool === 'paint' && (
         <fieldset className="field">
-          <legend>Terrain</legend>
+          <legend>{t('Terrain')}</legend>
           <div className="swatches">
-            {PAINTABLE.map((t) => (
-              <button key={t} type="button" className={`swatch ${s.terrain === t ? 'is-on' : ''}`} aria-pressed={s.terrain === t} onClick={() => set({ terrain: t })}>
-                <i style={{ background: `rgb(${TERRAIN_COLORS[t].join(',')})` }} />
-                {TERRAIN_NAMES[t]}
+            {PAINTABLE.map((tr) => (
+              <button key={tr} type="button" className={`swatch ${s.terrain === tr ? 'is-on' : ''}`} aria-pressed={s.terrain === tr} onClick={() => set({ terrain: tr })}>
+                <i style={{ background: `rgb(${TERRAIN_COLORS[tr].join(',')})` }} />
+                {t(TERRAIN_NAMES[tr])}
               </button>
             ))}
           </div>
@@ -108,14 +109,14 @@ export function EditPanel(p: Props) {
 
       <div className="history">
         <button type="button" className="btn btn--ghost" onClick={p.onUndo} disabled={!p.canUndo || p.working} title="Ctrl+Z">
-          Undo{p.undoLabel ? `: ${p.undoLabel.toLowerCase()}` : ''}
+          {t('Undo')}{p.undoLabel ? `: ${t(p.undoLabel).toLowerCase()}` : ''}
         </button>
         <button type="button" className="btn btn--ghost" onClick={p.onRedo} disabled={!p.canRedo || p.working} title="Ctrl+Shift+Z">
-          Redo
+          {t('Redo')}
         </button>
       </div>
       <p className="muted status" aria-live="polite">
-        {p.working ? 'Updating the map…' : p.editedHexes ? `${p.editedHexes.toLocaleString()} hexes edited by hand` : 'No hand edits to the land yet'}
+        {p.working ? t('Updating the map…') : p.editedHexes ? t('{n} hexes edited by hand', { n: num(p.editedHexes) }) : t('No hand edits to the land yet')}
       </p>
     </div>
   );
@@ -130,11 +131,11 @@ function LabelControls(p: Props) {
       {p.selectedLabel ? (
         <>
           <p className="label-controls__name">{p.selectedLabelName}</p>
-          <Slider label="Size" value={e.scale ?? 1} min={0.4} max={2.5} step={0.05} format={(v) => `${Math.round(v * 100)}%`} onChange={(v) => p.onAdjustLabel({ scale: v })} onEnd={end('Resize label')} />
+          <Slider label={t('Size')} value={e.scale ?? 1} min={0.4} max={2.5} step={0.05} format={(v) => `${Math.round(v * 100)}%`} onChange={(v) => p.onAdjustLabel({ scale: v })} onEnd={end(t('Resize label'))} />
           {curved && (
             <>
-              <Slider label="Curve" value={e.bend ?? 0} min={-0.4} max={0.4} step={0.01} format={(v) => (Math.abs(v) < 0.01 ? 'As drawn' : v > 0 ? 'Arched' : 'Sagging')} onChange={(v) => p.onAdjustLabel({ bend: v })} onEnd={end('Bend label')} />
-              <Slider label="Angle" value={((e.angle ?? 0) * 180) / Math.PI} min={-60} max={60} step={1} format={(v) => `${Math.round(v)}°`} onChange={(v) => p.onAdjustLabel({ angle: (v * Math.PI) / 180 })} onEnd={end('Turn label')} />
+              <Slider label={t('Curve')} value={e.bend ?? 0} min={-0.4} max={0.4} step={0.01} format={(v) => t(Math.abs(v) < 0.01 ? 'As drawn' : v > 0 ? 'Arched' : 'Sagging')} onChange={(v) => p.onAdjustLabel({ bend: v })} onEnd={end(t('Bend label'))} />
+              <Slider label={t('Angle')} value={((e.angle ?? 0) * 180) / Math.PI} min={-60} max={60} step={1} format={(v) => `${Math.round(v)}°`} onChange={(v) => p.onAdjustLabel({ angle: (v * Math.PI) / 180 })} onEnd={end(t('Turn label'))} />
             </>
           )}
           <div className="history">
@@ -143,29 +144,29 @@ function LabelControls(p: Props) {
               className="btn btn--ghost"
               onClick={() => {
                 p.onAdjustLabel({ hidden: true });
-                p.onAdjustLabelEnd('Hide label');
+                p.onAdjustLabelEnd(t('Hide label'));
               }}
             >
-              Hide
+              {t('Hide')}
             </button>
             <button
               type="button"
               className="btn btn--ghost"
               onClick={() => {
                 p.onAdjustLabel(null);
-                p.onAdjustLabelEnd('Reset label');
+                p.onAdjustLabelEnd(t('Reset label'));
               }}
             >
-              Reset
+              {t('Reset')}
             </button>
           </div>
         </>
       ) : (
-        <p className="hint">Click a name on the map to adjust it.</p>
+        <p className="hint">{t('Click a name on the map to adjust it.')}</p>
       )}
       {p.hiddenLabels > 0 && (
         <button type="button" className="btn btn--ghost btn--wide" onClick={p.onShowAllLabels}>
-          Show {p.hiddenLabels} hidden {p.hiddenLabels === 1 ? 'name' : 'names'}
+          {tn('Show {n} hidden name', 'Show {n} hidden names', p.hiddenLabels)}
         </button>
       )}
     </div>

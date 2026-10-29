@@ -50,6 +50,10 @@ Requires Node 20 or newer and a browser with WebGL 2.
   alone. Elevation, Temperature, Rainfall, Biome and Terrain type show the
   exact game value of every hex, with a legend.
 - **Quality** (top bar): High, Balanced or Fast, for slower graphics cards.
+- **Language** (flag in the left panel): English or Portuguese (pt-PT). The
+  choice is remembered; on first start it follows the browser's language.
+  Generated place names and your own names are not translated. Exported data
+  (JSON, CSV, README) stays in English so game code can rely on it.
 - **Edit** (left panel, second tab): reshape the world by hand.
   - *Land*: Raise land, Lower land, Smooth, Flatten, Paint terrain.
   - *Water*: Draw river (from source to the sea; the land is cut so water runs
@@ -147,7 +151,7 @@ While a tool is active, right-drag or hold Space to move the map.
 | Renderer | `src/render/` | Three.js with one full-screen GLSL shader: paper and terrain looks, biome colour, slope-following gully relief, tree canopy, farmland, water, analytic smooth borders, data map modes, meandering river ribbons, canvas lettering with collision checks. |
 | Editing | `src/edit/`, `src/gen/rederive.ts` | Brushes work on the heightfield and edit layers in place (live redraw while dragging); each stroke is one undo step stored as a diff. A deterministic rebuild in the worker re-derives everything from heightfield + edits and repairs the political map without renumbering ids. |
 | Exports | `src/export/`, `src/worker/exportWorker.ts` | Tiled high-resolution rendering with a second offscreen renderer; province ID image with generated sea zones, heightmaps, masks and tables built in a worker; an exact PNG encoder (8/16-bit) and a zip writer with no dependencies. |
-| UI | `src/ui/` | React. |
+| UI | `src/ui/`, `src/i18n/` | React. Interface strings are written in English and looked up in `src/i18n/pt.ts`; a test fails if any string shown in the interface has no translation. |
 | Desktop | `src-tauri/`, `src/platform.ts`, `public/sw.js` | Tauri 2 shell with native Save dialogs; the web build is an installable offline app. |
 
 Borders are computed in the shader from a Gaussian vote of nearby hexes, the
