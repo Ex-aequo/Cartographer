@@ -11,6 +11,16 @@ export const COAST_SCALE = 8;
 /** Gaussian kernel (σ², world units²) of the province vote. Shared with the shader. */
 export const BORDER_SIGMA2 = 0.62;
 
+/**
+ * Smoothing of drawn borders before they snap to hex edges. 4X maps have few,
+ * big hexes, so their smooth borders keep closer to the hexes (less wobble,
+ * a narrower vote) to look like classic borders at the same screen size.
+ */
+export function borderBase(map: { meta: { params: { game?: { on: boolean } } } }): { sigma2: number; warp: number } {
+  if (!map.meta.params.game?.on) return { sigma2: BORDER_SIGMA2, warp: 1 };
+  return { sigma2: BORDER_SIGMA2 + (0.04 - BORDER_SIGMA2) * 0.15, warp: 0.75 };
+}
+
 export interface RiverMesh {
   /** x, y per vertex (world units) */
   position: Float32Array;
@@ -105,8 +115,9 @@ export function ownerAt(map: MapData, a: Pick<RenderAssets, 'warp' | 'warpW' | '
   const at = (i: number, j: number, c: number) => W[(j * ww + i) * 2 + c];
   const dx = (at(ii, jj, 0) * (1 - tx) + at(ii + 1, jj, 0) * tx) * (1 - ty) + (at(ii, jj + 1, 0) * (1 - tx) + at(ii + 1, jj + 1, 0) * tx) * ty;
   const dy = (at(ii, jj, 1) * (1 - tx) + at(ii + 1, jj, 1) * tx) * (1 - ty) + (at(ii, jj + 1, 1) * (1 - tx) + at(ii + 1, jj + 1, 1) * tx) * ty;
-  const px = x + dx;
-  const py = y + dy;
+  const base = borderBase(map);
+  const px = x + dx * base.warp;
+  const py = y + dy * base.warp;
   const idOf = (prov: number) => (level === 'province' ? prov : level === 'region' ? provinces[prov].region : regions[provinces[prov].region].realm);
   const h = hexAt(grid, px, py);
   if (h >= 0) {
@@ -119,7 +130,7 @@ export function ownerAt(map: MapData, a: Pick<RenderAssets, 'warp' | 'warpW' | '
       const pc = hex.province[c];
       if (pc < 0) continue;
       const row = Math.floor(c / grid.cols);
-      const wgt = Math.exp(-((hexCenterX(c % grid.cols, row) - px) ** 2 + (hexCenterY(row) - py) ** 2) / BORDER_SIGMA2);
+      const wgt = Math.exp(-((hexCenterX(c % grid.cols, row) - px) ** 2 + (hexCenterY(row) - py) ** 2) / base.sigma2);
       const id = idOf(pc);
       const t = ids.indexOf(id);
       if (t >= 0) ws[t] += wgt;

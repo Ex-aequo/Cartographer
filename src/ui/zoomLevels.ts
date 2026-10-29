@@ -25,7 +25,7 @@ export const LEVELS: ZoomLevel[] = [
  */
 export function levelsFor(game: boolean, world?: { width: number }): ZoomLevel[] {
   if (!game) return LEVELS;
-  if (world) applyZoomProfile(world);
+  if (world) applyZoomProfile(world, true);
   return [
     { key: 'world', name: 'World', hint: 'Paper map of kingdoms', from: 0, target: 0 },
     { key: 'kingdom', name: 'Kingdom', hint: 'Provinces and settlements', from: ZOOM.paperEnd * 1.05, target: ZOOM.townFade1 * 1.05 },

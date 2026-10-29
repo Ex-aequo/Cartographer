@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import type { MapData } from '../model/types';
+import { isGameMap, type MapData } from '../model/types';
 import type { RenderAssets } from './assets';
-import { BORDER_SIGMA2, COAST_SCALE } from './assets';
+import { BORDER_SIGMA2, COAST_SCALE, borderBase } from './assets';
 import { LAPSE } from '../gen/biomes';
 import { categoriesFor, modeDef, rampFor, type MapMode } from './mapModes';
 export type { MapMode } from './mapModes';
@@ -31,6 +31,9 @@ const ZOOM_CLASSIC = {
   /** towns and province names fade in between these */
   townFade0: 13,
   townFade1: 18,
+  /** borders tighten onto hex edges between these */
+  snapStart: 38,
+  snapFull: 60,
   min: 0.6,
   max: 220,
 };
@@ -43,7 +46,7 @@ const ZOOM_CLASSIC = {
  */
 export const ZOOM = { ...ZOOM_CLASSIC };
 
-export function applyZoomProfile(world: { width: number }): void {
+export function applyZoomProfile(world: { width: number }, game = false): void {
   const fit = 1300 / Math.max(1, world.width); // whole world on a typical screen
   const paperEnd = Math.max(ZOOM_CLASSIC.paperEnd, 1.4 * fit);
   const terrainStart = Math.max(ZOOM_CLASSIC.terrainStart, 2.3 * fit);
@@ -61,6 +64,9 @@ export function applyZoomProfile(world: { width: number }): void {
     townFade1: townFade0 * (ZOOM_CLASSIC.townFade1 / ZOOM_CLASSIC.townFade0),
     max: Math.max(ZOOM_CLASSIC.max, hexStart * 5),
   });
+  // 4X maps: frontiers follow hex edges from the Kingdom level inward; classic maps only at Hex zoom
+  ZOOM.snapStart = game ? paperEnd : ZOOM.hexStart;
+  ZOOM.snapFull = game ? paperEnd * 1.3 : ZOOM.hexFull;
 }
 
 export type Quality = 'high' | 'balanced' | 'fast';
@@ -74,6 +80,12 @@ export function pixelRatioFor(q: Quality): number {
 
 export function hexFactor(zoom: number): number {
   const t = Math.min(1, Math.max(0, (zoom - ZOOM.hexStart) / (ZOOM.hexFull - ZOOM.hexStart)));
+  return t * t * (3 - 2 * t);
+}
+
+/** How far borders have tightened onto hex edges at a zoom (0 = smooth, 1 = on the edges). */
+export function borderSnap(zoom: number): number {
+  const t = Math.min(1, Math.max(0, (zoom - ZOOM.snapStart) / Math.max(1e-6, ZOOM.snapFull - ZOOM.snapStart)));
   return t * t * (3 - 2 * t);
 }
 
@@ -91,6 +103,7 @@ void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }
 export class MapRenderer {
   readonly renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
+  private border = { sigma2: BORDER_SIGMA2, warp: 1 };
   private camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   private mapMat: THREE.RawShaderMaterial;
   private riverMat: THREE.RawShaderMaterial;
@@ -184,7 +197,8 @@ export class MapRenderer {
   setMap(map: MapData, a: RenderAssets): void {
     this.disposeTextures();
     this.world = map.world;
-    applyZoomProfile(map.world);
+    applyZoomProfile(map.world, isGameMap(map.meta.params));
+    this.border = borderBase(map);
     const u = this.mapMat.uniforms;
     u.uWorld.value.set(map.world.width, map.world.height);
 
@@ -298,8 +312,9 @@ export class MapRenderer {
     const hz = hexFactor(s.view.zoom);
     u.uHexGrid.value = hz;
     // at hex zoom, borders tighten onto hex edges so they agree with the grid
-    u.uSigma2.value = BORDER_SIGMA2 + (0.04 - BORDER_SIGMA2) * hz;
-    u.uWarpAmt.value = 1 - hz;
+    const snap = borderSnap(s.view.zoom);
+    u.uSigma2.value = this.border.sigma2 + (0.04 - this.border.sigma2) * snap;
+    u.uWarpAmt.value = this.border.warp * (1 - snap);
     // the 3D camera (same maths as render/camera.ts, in device px)
     const v = s.view;
     u.u3D.value = is3d(v) ? 1 : 0;
